@@ -126,25 +126,29 @@ async def get_filtros():
         logger.error(f"Error fetching filtros: {e}")
         return {"nichos": [], "subnichos": [], "canais": []}
 
-@app.post("/api/add-canal")
-async def add_canal_manual(
-    nome_canal: str,
-    url_canal: str,
-    nicho: str,
-    subnicho: str = "",
+from pydantic import BaseModel
+
+# Adicione esta classe antes da função add_canal_manual
+class CanalCreate(BaseModel):
+    nome_canal: str
+    url_canal: str
+    nicho: str
+    subnicho: str = ""
     status: str = "ativo"
-):
+
+@app.post("/api/add-canal")
+async def add_canal_manual(canal: CanalCreate):
     """Add a canal manually"""
     if not services_initialized or not db:
         raise HTTPException(status_code=503, detail="Service not ready")
     
     try:
         canal_data = {
-            'nome_canal': nome_canal,
-            'url_canal': url_canal,
-            'nicho': nicho,
-            'subnicho': subnicho,
-            'status': status
+            'nome_canal': canal.nome_canal,
+            'url_canal': canal.url_canal,
+            'nicho': canal.nicho,
+            'subnicho': canal.subnicho,
+            'status': canal.status
         }
         
         result = await db.upsert_canal(canal_data)

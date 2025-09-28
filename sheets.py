@@ -20,6 +20,13 @@ class SheetsManager:
             # Parse credentials JSON
             credentials_data = json.loads(credentials_json)
             
+            # Fix private key format - ensure proper line breaks
+            if 'private_key' in credentials_data:
+                private_key = credentials_data['private_key']
+                # Replace \\n with actual line breaks
+                private_key = private_key.replace('\\n', '\n')
+                credentials_data['private_key'] = private_key
+            
             # Set up credentials
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets',

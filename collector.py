@@ -55,10 +55,11 @@ class YouTubeCollector:
         """Get channel ID from username/handle"""
         try:
             async with aiohttp.ClientSession() as session:
-                # Try with @ handle first
+                # Clean the username
                 if username.startswith('@'):
                     username = username[1:]
                 
+                # Try with forHandle first (for @ handles)
                 url = f"{self.base_url}/channels"
                 params = {
                     'part': 'id',
@@ -71,7 +72,7 @@ class YouTubeCollector:
                         data = await response.json()
                         if data.get('items'):
                             return data['items'][0]['id']
-                    
+                
                     # If handle doesn't work, try forUsername
                     params = {
                         'part': 'id',
@@ -280,44 +281,43 @@ class YouTubeCollector:
         return 0
 
     def calculate_views_by_period(self, videos: List[Dict], current_date: datetime) -> Dict[str, int]:
-    """Calculate views for different periods"""
-    views_60d = views_30d = views_15d = views_7d = 0
-    
-    # Ensure current_date is timezone-aware
-    if current_date.tzinfo is None:
-        from datetime import timezone
-        current_date = current_date.replace(tzinfo=timezone.utc)
-    
-    for video in videos:
-        try:
-            # Parse publication date
-            pub_date_str = video['data_publicacao'].replace('Z', '+00:00')
-            pub_date = datetime.fromisoformat(pub_date_str)
-            
-            # Ensure pub_date is timezone-aware
-            if pub_date.tzinfo is None:
-                pub_date = pub_date.replace(tzinfo=timezone.utc)
-            
-            days_ago = (current_date - pub_date).days
-            
-            if days_ago <= 60:
-                views_60d += video['views_atuais']
-            if days_ago <= 30:
-                views_30d += video['views_atuais']
-            if days_ago <= 15:
-                views_15d += video['views_atuais']
-            if days_ago <= 7:
-                views_7d += video['views_atuais']
-        except Exception as e:
-            logger.debug(f"Error processing video date: {e}")
-            continue
-    
-    return {
-        'views_60d': views_60d,
-        'views_30d': views_30d,
-        'views_15d': views_15d,
-        'views_7d': views_7d
-    }
+        """Calculate views for different periods"""
+        views_60d = views_30d = views_15d = views_7d = 0
+        
+        # Ensure current_date is timezone-aware
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
+        
+        for video in videos:
+            try:
+                # Parse publication date
+                pub_date_str = video['data_publicacao'].replace('Z', '+00:00')
+                pub_date = datetime.fromisoformat(pub_date_str)
+                
+                # Ensure pub_date is timezone-aware
+                if pub_date.tzinfo is None:
+                    pub_date = pub_date.replace(tzinfo=timezone.utc)
+                
+                days_ago = (current_date - pub_date).days
+                
+                if days_ago <= 60:
+                    views_60d += video['views_atuais']
+                if days_ago <= 30:
+                    views_30d += video['views_atuais']
+                if days_ago <= 15:
+                    views_15d += video['views_atuais']
+                if days_ago <= 7:
+                    views_7d += video['views_atuais']
+            except Exception as e:
+                logger.debug(f"Error processing video date: {e}")
+                continue
+        
+        return {
+            'views_60d': views_60d,
+            'views_30d': views_30d,
+            'views_15d': views_15d,
+            'views_7d': views_7d
+        }
 
     async def get_canal_data(self, url_canal: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
@@ -347,7 +347,19 @@ class YouTubeCollector:
             views_by_period = self.calculate_views_by_period(videos, current_date)
             
             # Count videos published in last 7 days
-            videos_7d = len([v for v in videos if (current_date - datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))).days <= 7])
+            videos_7d = 0
+            for v in videos:
+                try:
+                    pub_date_str = v['data_publicacao'].replace('Z', '+00:00')
+                    pub_date = datetime.fromisoformat(pub_date_str)
+                    if pub_date.tzinfo is None:
+                        pub_date = pub_date.replace(tzinfo=timezone.utc)
+                    if current_date.tzinfo is None:
+                        current_date = datetime.now(timezone.utc)
+                    if (current_date - pub_date).days <= 7:
+                        videos_7d += 1
+                except:
+                    continue
             
             # Calculate engagement rate (simplified)
             total_engagement = sum(v['likes'] + v['comentarios'] for v in videos)

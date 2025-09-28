@@ -175,70 +175,69 @@ class SupabaseClient:
             raise
 
     async def get_videos_with_filters(
-        self,
-        nicho: Optional[str] = None,
-        subnicho: Optional[str] = None,
-        lingua: Optional[str] = None,  # NOVO
-        canal: Optional[str] = None,
-        periodo_publicacao: str = "60d",
-        views_min: Optional[int] = None,
-        growth_min: Optional[float] = None,
-        order_by: str = "views_atuais",
-        limit: int = 100,
-        offset: int = 0
-    ) -> List[Dict]:
-        """Get videos with filters for Funcionalidade 2"""
-        try:
-            # Calculate date filter based on periodo_publicacao
-            days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
-            days = days_map.get(periodo_publicacao, 60)
-            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+    self,
+    nicho: Optional[str] = None,
+    subnicho: Optional[str] = None,
+    lingua: Optional[str] = None,
+    canal: Optional[str] = None,
+    periodo_publicacao: str = "60d",
+    views_min: Optional[int] = None,
+    growth_min: Optional[float] = None,
+    order_by: str = "views_atuais",
+    limit: int = 100,
+    offset: int = 0
+) -> List[Dict]:
+    """Get videos with filters for Funcionalidade 2"""
+    try:
+        # Calculate date filter
+        days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
+        days = days_map.get(periodo_publicacao, 60)
+        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        # Busca simples sem JOIN complexo
+        query = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date)
+        
+        if views_min:
+            query = query.gte("views_atuais", views_min)
+        
+        # Order by specified column
+        desc = order_by in ["views_atuais", "growth_video"]
+        query = query.order(order_by, desc=desc)
+        query = query.range(offset, offset + limit - 1)
+        
+        response = query.execute()
+        
+        # Adicionar informações do canal manualmente
+        videos = []
+        for video in response.data:
+            # Buscar info do canal
+            canal_info = self.supabase.table("canais_monitorados").select("nome_canal, nicho, subnicho, lingua").eq("id", video["canal_id"]).single().execute()
             
-            # Join videos with canais to get nicho/subnicho/lingua
-            query = self.supabase.table("videos_historico").select("""
-                *,
-                canais_monitorados!inner(nome_canal, nicho, subnicho, lingua)
-            """).gte("data_publicacao", cutoff_date)
-            
-            # Apply filters
-            if nicho:
-                query = query.eq("canais_monitorados.nicho", nicho)
-            if subnicho:
-                query = query.eq("canais_monitorados.subnicho", subnicho)
-            if lingua:  # NOVO
-                query = query.eq("canais_monitorados.lingua", lingua)
-            if canal:
-                query = query.eq("canais_monitorados.nome_canal", canal)
-            if views_min:
-                query = query.gte("views_atuais", views_min)
-            if growth_min:
-                # Growth calculation would need to be done in the view or with subquery
-                pass
-            
-            # Order by specified column
-            desc = order_by in ["views_atuais", "growth_video"]
-            query = query.order(order_by, desc=desc)
-            query = query.range(offset, offset + limit - 1)
-            
-            response = query.execute()
-            
-            # Flatten the nested structure
-            videos = []
-            for item in response.data:
-                video = dict(item)
-                canal_info = video.pop("canais_monitorados")
+            if canal_info.data:
                 video.update({
-                    "nome_canal": canal_info["nome_canal"],
-                    "nicho": canal_info["nicho"],
-                    "subnicho": canal_info["subnicho"],
-                    "lingua": canal_info.get("lingua", "")  # NOVO
+                    "nome_canal": canal_info.data["nome_canal"],
+                    "nicho": canal_info.data["nicho"],
+                    "subnicho": canal_info.data["subnicho"],
+                    "lingua": canal_info.data.get("lingua", "")
                 })
+                
+                # Aplicar filtros
+                if nicho and video["nicho"] != nicho:
+                    continue
+                if subnicho and video["subnicho"] != subnicho:
+                    continue
+                if lingua and video["lingua"] != lingua:
+                    continue
+                if canal and video["nome_canal"] != canal:
+                    continue
+                    
                 videos.append(video)
-            
-            return videos
-        except Exception as e:
-            logger.error(f"Error fetching videos with filters: {e}")
-            raise
+        
+        return videos[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error fetching videos with filters: {e}")
+        return []  # Retornar lista vazia em vez de raise
 
     async def get_filter_options(self) -> Dict[str, List]:
         """Get available filter options"""

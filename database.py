@@ -36,7 +36,7 @@ class SupabaseClient:
                 "url_canal": canal_data.get("url_canal"),
                 "nicho": canal_data.get("nicho"),
                 "subnicho": canal_data.get("subnicho"),
-                "lingua": canal_data.get("lingua"),  # NOVO
+                "lingua": canal_data.get("lingua"),
                 "status": canal_data.get("status", "ativo")
             }).execute()
             
@@ -130,7 +130,7 @@ class SupabaseClient:
         self,
         nicho: Optional[str] = None,
         subnicho: Optional[str] = None,
-        lingua: Optional[str] = None,  # NOVO
+        lingua: Optional[str] = None,
         views_60d_min: Optional[int] = None,
         views_30d_min: Optional[int] = None,
         views_15d_min: Optional[int] = None,
@@ -149,7 +149,7 @@ class SupabaseClient:
                 query = query.eq("nicho", nicho)
             if subnicho:
                 query = query.eq("subnicho", subnicho)
-            if lingua:  # NOVO
+            if lingua:
                 query = query.eq("lingua", lingua)
             if views_60d_min:
                 query = query.gte("views_60d", views_60d_min)
@@ -175,69 +175,77 @@ class SupabaseClient:
             raise
 
     async def get_videos_with_filters(
-    self,
-    nicho: Optional[str] = None,
-    subnicho: Optional[str] = None,
-    lingua: Optional[str] = None,
-    canal: Optional[str] = None,
-    periodo_publicacao: str = "60d",
-    views_min: Optional[int] = None,
-    growth_min: Optional[float] = None,
-    order_by: str = "views_atuais",
-    limit: int = 100,
-    offset: int = 0
-) -> List[Dict]:
-    """Get videos with filters for Funcionalidade 2"""
-    try:
-        # Calculate date filter
-        days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
-        days = days_map.get(periodo_publicacao, 60)
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-        
-        # Busca simples sem JOIN complexo
-        query = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date)
-        
-        if views_min:
-            query = query.gte("views_atuais", views_min)
-        
-        # Order by specified column
-        desc = order_by in ["views_atuais", "growth_video"]
-        query = query.order(order_by, desc=desc)
-        query = query.range(offset, offset + limit - 1)
-        
-        response = query.execute()
-        
-        # Adicionar informações do canal manualmente
-        videos = []
-        for video in response.data:
-            # Buscar info do canal
-            canal_info = self.supabase.table("canais_monitorados").select("nome_canal, nicho, subnicho, lingua").eq("id", video["canal_id"]).single().execute()
+        self,
+        nicho: Optional[str] = None,
+        subnicho: Optional[str] = None,
+        lingua: Optional[str] = None,
+        canal: Optional[str] = None,
+        periodo_publicacao: str = "60d",
+        views_min: Optional[int] = None,
+        growth_min: Optional[float] = None,
+        order_by: str = "views_atuais",
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict]:
+        """Get videos with filters for Funcionalidade 2"""
+        try:
+            # Calculate date filter based on periodo_publicacao
+            days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
+            days = days_map.get(periodo_publicacao, 60)
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
             
-            if canal_info.data:
-                video.update({
-                    "nome_canal": canal_info.data["nome_canal"],
-                    "nicho": canal_info.data["nicho"],
-                    "subnicho": canal_info.data["subnicho"],
-                    "lingua": canal_info.data.get("lingua", "")
-                })
-                
-                # Aplicar filtros
-                if nicho and video["nicho"] != nicho:
-                    continue
-                if subnicho and video["subnicho"] != subnicho:
-                    continue
-                if lingua and video["lingua"] != lingua:
-                    continue
-                if canal and video["nome_canal"] != canal:
-                    continue
+            # Busca simples dos vídeos
+            query = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date)
+            
+            if views_min:
+                query = query.gte("views_atuais", views_min)
+            
+            # Order by specified column
+            desc = order_by in ["views_atuais", "growth_video"]
+            query = query.order(order_by, desc=desc)
+            
+            response = query.execute()
+            
+            # Adicionar informações do canal manualmente
+            videos = []
+            for video in response.data:
+                try:
+                    # Buscar info do canal
+                    canal_response = self.supabase.table("canais_monitorados").select("nome_canal, nicho, subnicho, lingua").eq("id", video["canal_id"]).execute()
                     
-                videos.append(video)
-        
-        return videos[:limit]
-        
-    except Exception as e:
-        logger.error(f"Error fetching videos with filters: {e}")
-        return []  # Retornar lista vazia em vez de raise
+                    if canal_response.data and len(canal_response.data) > 0:
+                        canal_info = canal_response.data[0]
+                        video.update({
+                            "nome_canal": canal_info["nome_canal"],
+                            "nicho": canal_info["nicho"],
+                            "subnicho": canal_info["subnicho"],
+                            "lingua": canal_info.get("lingua", "")
+                        })
+                        
+                        # Aplicar filtros
+                        if nicho and video["nicho"] != nicho:
+                            continue
+                        if subnicho and video["subnicho"] != subnicho:
+                            continue
+                        if lingua and video["lingua"] != lingua:
+                            continue
+                        if canal and video["nome_canal"] != canal:
+                            continue
+                            
+                        videos.append(video)
+                        
+                        if len(videos) >= limit:
+                            break
+                            
+                except Exception as e:
+                    logger.error(f"Error processing video {video.get('id')}: {e}")
+                    continue
+            
+            return videos
+            
+        except Exception as e:
+            logger.error(f"Error fetching videos with filters: {e}")
+            return []
 
     async def get_filter_options(self) -> Dict[str, List]:
         """Get available filter options"""
@@ -250,7 +258,7 @@ class SupabaseClient:
             subnichos_response = self.supabase.table("canais_monitorados").select("subnicho").execute()
             subnichos = list(set(item["subnicho"] for item in subnichos_response.data if item["subnicho"]))
             
-            # Get unique linguas - NOVO
+            # Get unique linguas
             linguas_response = self.supabase.table("canais_monitorados").select("lingua").execute()
             linguas = list(set(item["lingua"] for item in linguas_response.data if item["lingua"]))
             
@@ -261,7 +269,7 @@ class SupabaseClient:
             return {
                 "nichos": sorted(nichos),
                 "subnichos": sorted(subnichos),
-                "linguas": sorted(linguas),  # NOVO
+                "linguas": sorted(linguas),
                 "canais": sorted(canais)
             }
         except Exception as e:

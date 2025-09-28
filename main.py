@@ -10,7 +10,7 @@ import logging
 
 from database import SupabaseClient
 from collector import YouTubeCollector
-from sheets import SheetsManager
+# from sheets import SheetsManager  # Temporarily disabled
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,11 +30,11 @@ app.add_middleware(
 # Initialize services
 db = SupabaseClient()
 collector = YouTubeCollector()
-sheets = SheetsManager()
+# sheets = SheetsManager()  # Temporarily disabled
 
 @app.get("/")
 async def root():
-    return {"message": "YouTube Dashboard API is running", "status": "healthy"}
+    return {"message": "YouTube Dashboard API is running", "status": "healthy", "version": "1.0"}
 
 @app.get("/health")
 async def health_check():
@@ -42,7 +42,13 @@ async def health_check():
     try:
         # Test database connection
         await db.test_connection()
-        return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+        return {
+            "status": "healthy", 
+            "timestamp": datetime.now().isoformat(),
+            "supabase": "connected",
+            "youtube_api": "configured",
+            "sheets": "temporarily_disabled"
+        }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Service unhealthy")
@@ -125,16 +131,30 @@ async def get_filtros():
         logger.error(f"Error fetching filtros: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/sync-sheets")
-async def sync_sheets(background_tasks: BackgroundTasks):
+@app.post("/api/add-canal")
+async def add_canal_manual(
+    nome_canal: str,
+    url_canal: str,
+    nicho: str,
+    subnicho: str = "",
+    status: str = "ativo"
+):
     """
-    Sync new canais from Google Sheets
+    Add a canal manually (since sheets is disabled)
     """
     try:
-        background_tasks.add_task(sync_canais_from_sheets)
-        return {"message": "Sync started", "status": "processing"}
+        canal_data = {
+            'nome_canal': nome_canal,
+            'url_canal': url_canal,
+            'nicho': nicho,
+            'subnicho': subnicho,
+            'status': status
+        }
+        
+        result = await db.upsert_canal(canal_data)
+        return {"message": "Canal added successfully", "canal": result}
     except Exception as e:
-        logger.error(f"Error starting sync: {e}")
+        logger.error(f"Error adding canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/collect-data")
@@ -162,31 +182,10 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 # Background tasks
-async def sync_canais_from_sheets():
-    """Sync canais from Google Sheets to database"""
-    try:
-        logger.info("Starting sheets sync...")
-        
-        # Get canais from sheets
-        sheet_canais = await sheets.get_canais()
-        logger.info(f"Found {len(sheet_canais)} canais in sheets")
-        
-        # Sync to database
-        for canal_data in sheet_canais:
-            await db.upsert_canal(canal_data)
-        
-        logger.info("Sheets sync completed")
-    except Exception as e:
-        logger.error(f"Sheets sync failed: {e}")
-        raise
-
 async def run_collection_job():
     """Run the hybrid collection job"""
     try:
         logger.info("Starting collection job...")
-        
-        # First sync sheets
-        await sync_canais_from_sheets()
         
         # Get canais that need collection
         canais_to_collect = await db.get_canais_for_collection()

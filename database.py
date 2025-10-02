@@ -36,7 +36,8 @@ class SupabaseClient:
                 "url_canal": canal_data.get("url_canal"),
                 "nicho": canal_data.get("nicho"),
                 "subnicho": canal_data.get("subnicho"),
-                "lingua": canal_data.get("lingua", "English"),  # Adicionar lingua com default
+                "lingua": canal_data.get("lingua", "English"),
+                "tipo": canal_data.get("tipo", "minerado"),  # ADICIONADO
                 "status": canal_data.get("status", "ativo")
             }).execute()
             
@@ -130,7 +131,8 @@ class SupabaseClient:
         self,
         nicho: Optional[str] = None,
         subnicho: Optional[str] = None,
-        lingua: Optional[str] = None,  # ADICIONADO: parâmetro lingua
+        lingua: Optional[str] = None,
+        tipo: Optional[str] = None,  # ADICIONADO
         views_60d_min: Optional[int] = None,
         views_30d_min: Optional[int] = None,
         views_15d_min: Optional[int] = None,
@@ -150,8 +152,10 @@ class SupabaseClient:
                 query = query.eq("nicho", nicho)
             if subnicho:
                 query = query.eq("subnicho", subnicho)
-            if lingua:  # ADICIONADO: filtro de lingua
+            if lingua:
                 query = query.eq("lingua", lingua)
+            if tipo:  # ADICIONADO
+                query = query.eq("tipo", tipo)  # ADICIONADO
             if views_60d_min:
                 query = query.gte("views_60d", views_60d_min)
             if views_30d_min:
@@ -188,8 +192,10 @@ class SupabaseClient:
                 query = query.eq("nicho", nicho)
             if subnicho:
                 query = query.eq("subnicho", subnicho)
-            if lingua:  # ADICIONADO: filtro de lingua na query direta
+            if lingua:
                 query = query.eq("lingua", lingua)
+            if tipo:  # ADICIONADO
+                query = query.eq("tipo", tipo)  # ADICIONADO
             
             response = query.execute()
             
@@ -202,7 +208,8 @@ class SupabaseClient:
                     "url_canal": item["url_canal"],
                     "nicho": item["nicho"],
                     "subnicho": item["subnicho"],
-                    "lingua": item.get("lingua", "N/A"),  # ADICIONADO: incluir lingua
+                    "lingua": item.get("lingua", "N/A"),
+                    "tipo": item.get("tipo", "minerado"),  # ADICIONADO
                     "status": item["status"]
                 }
                 
@@ -243,7 +250,7 @@ class SupabaseClient:
         self,
         nicho: Optional[str] = None,
         subnicho: Optional[str] = None,
-        lingua: Optional[str] = None,  # ADICIONADO: parâmetro lingua
+        lingua: Optional[str] = None,
         canal: Optional[str] = None,
         periodo_publicacao: str = "60d",
         views_min: Optional[int] = None,
@@ -285,14 +292,14 @@ class SupabaseClient:
                     video["nome_canal"] = canal_info.get("nome_canal", "Unknown")
                     video["nicho"] = canal_info.get("nicho", "Unknown")
                     video["subnicho"] = canal_info.get("subnicho", "Unknown")
-                    video["lingua"] = canal_info.get("lingua", "N/A")  # ADICIONADO: incluir lingua
+                    video["lingua"] = canal_info.get("lingua", "N/A")
                 
                 # Aplicar filtros após obter informações dos canais
                 if nicho:
                     videos = [v for v in videos if v.get("nicho") == nicho]
                 if subnicho:
                     videos = [v for v in videos if v.get("subnicho") == subnicho]
-                if lingua:  # ADICIONADO: filtro de lingua
+                if lingua:
                     videos = [v for v in videos if v.get("lingua") == lingua]
                 if canal:
                     videos = [v for v in videos if v.get("nome_canal") == canal]
@@ -313,7 +320,7 @@ class SupabaseClient:
             subnichos_response = self.supabase.table("canais_monitorados").select("subnicho").execute()
             subnichos = list(set(item["subnicho"] for item in subnichos_response.data if item["subnicho"]))
             
-            # Get unique linguas - ADICIONADO
+            # Get unique linguas
             linguas_response = self.supabase.table("canais_monitorados").select("lingua").execute()
             linguas = list(set(item["lingua"] for item in linguas_response.data if item.get("lingua")))
             
@@ -324,7 +331,7 @@ class SupabaseClient:
             return {
                 "nichos": sorted(nichos),
                 "subnichos": sorted(subnichos),
-                "linguas": sorted(linguas),  # ADICIONADO: retornar linguas
+                "linguas": sorted(linguas),
                 "canais": sorted(canais)
             }
         except Exception as e:

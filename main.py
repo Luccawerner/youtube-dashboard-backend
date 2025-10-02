@@ -56,7 +56,7 @@ async def get_canais(
     nicho: Optional[str] = None,
     subnicho: Optional[str] = None,
     lingua: Optional[str] = None,
-    tipo: Optional[str] = None,  # ADICIONADO
+    tipo: Optional[str] = None,
     views_60d_min: Optional[int] = None,
     views_30d_min: Optional[int] = None,
     views_15d_min: Optional[int] = None,
@@ -74,7 +74,7 @@ async def get_canais(
             nicho=nicho,
             subnicho=subnicho,
             lingua=lingua,
-            tipo=tipo,  # ADICIONADO
+            tipo=tipo,
             views_60d_min=views_60d_min,
             views_30d_min=views_30d_min,
             views_15d_min=views_15d_min,
@@ -89,7 +89,7 @@ async def get_canais(
         logger.error(f"Error fetching canais: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/nossos-canais")  # NOVO ENDPOINT
+@app.get("/api/nossos-canais")
 async def get_nossos_canais(
     nicho: Optional[str] = None,
     subnicho: Optional[str] = None,
@@ -111,7 +111,7 @@ async def get_nossos_canais(
             nicho=nicho,
             subnicho=subnicho,
             lingua=lingua,
-            tipo="nosso",  # FORÇA tipo='nosso'
+            tipo="nosso",
             views_60d_min=views_60d_min,
             views_30d_min=views_30d_min,
             views_15d_min=views_15d_min,
@@ -179,7 +179,7 @@ async def add_canal_manual(
     nicho: str,
     subnicho: str = "",
     lingua: str = "English",
-    tipo: str = "minerado",  # ADICIONADO - por padrão é minerado
+    tipo: str = "minerado",
     status: str = "ativo"
 ):
     """
@@ -192,7 +192,7 @@ async def add_canal_manual(
             'nicho': nicho,
             'subnicho': subnicho,
             'lingua': lingua,
-            'tipo': tipo,  # ADICIONADO
+            'tipo': tipo,
             'status': status
         }
         
@@ -224,6 +224,68 @@ async def get_stats():
         return stats
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================
+# FAVORITOS - NOVOS ENDPOINTS
+# ========================
+
+@app.post("/api/favoritos/adicionar")
+async def add_favorito(tipo: str, item_id: int):
+    """
+    Add item to favorites
+    tipo: 'canal' ou 'video'
+    item_id: ID do canal ou vídeo
+    """
+    try:
+        if tipo not in ["canal", "video"]:
+            raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
+        
+        result = await db.add_favorito(tipo, item_id)
+        return {"message": "Favorito adicionado com sucesso", "favorito": result}
+    except Exception as e:
+        logger.error(f"Error adding favorito: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/favoritos/remover")
+async def remove_favorito(tipo: str, item_id: int):
+    """
+    Remove item from favorites
+    tipo: 'canal' ou 'video'
+    item_id: ID do canal ou vídeo
+    """
+    try:
+        if tipo not in ["canal", "video"]:
+            raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
+        
+        await db.remove_favorito(tipo, item_id)
+        return {"message": "Favorito removido com sucesso"}
+    except Exception as e:
+        logger.error(f"Error removing favorito: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/favoritos/canais")
+async def get_favoritos_canais():
+    """
+    Get all favorited channels
+    """
+    try:
+        canais = await db.get_favoritos_canais()
+        return {"canais": canais, "total": len(canais)}
+    except Exception as e:
+        logger.error(f"Error fetching favoritos canais: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/favoritos/videos")
+async def get_favoritos_videos():
+    """
+    Get all favorited videos
+    """
+    try:
+        videos = await db.get_favoritos_videos()
+        return {"videos": videos, "total": len(videos)}
+    except Exception as e:
+        logger.error(f"Error fetching favoritos videos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Background tasks

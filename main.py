@@ -10,7 +10,6 @@ import logging
 
 from database import SupabaseClient
 from collector import YouTubeCollector
-# from sheets import SheetsManager  # Temporarily disabled
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +20,7 @@ app = FastAPI(title="YouTube Dashboard API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especifique domínios
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,7 +29,6 @@ app.add_middleware(
 # Initialize services
 db = SupabaseClient()
 collector = YouTubeCollector()
-# sheets = SheetsManager()  # Temporarily disabled
 
 @app.get("/")
 async def root():
@@ -57,7 +55,8 @@ async def health_check():
 async def get_canais(
     nicho: Optional[str] = None,
     subnicho: Optional[str] = None,
-    lingua: Optional[str] = None,  # ADICIONADO: parâmetro lingua
+    lingua: Optional[str] = None,
+    tipo: Optional[str] = None,  # ADICIONADO
     views_60d_min: Optional[int] = None,
     views_30d_min: Optional[int] = None,
     views_15d_min: Optional[int] = None,
@@ -74,7 +73,8 @@ async def get_canais(
         canais = await db.get_canais_with_filters(
             nicho=nicho,
             subnicho=subnicho,
-            lingua=lingua,  # ADICIONADO: passar lingua para a função
+            lingua=lingua,
+            tipo=tipo,  # ADICIONADO
             views_60d_min=views_60d_min,
             views_30d_min=views_30d_min,
             views_15d_min=views_15d_min,
@@ -89,16 +89,53 @@ async def get_canais(
         logger.error(f"Error fetching canais: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/nossos-canais")  # NOVO ENDPOINT
+async def get_nossos_canais(
+    nicho: Optional[str] = None,
+    subnicho: Optional[str] = None,
+    lingua: Optional[str] = None,
+    views_60d_min: Optional[int] = None,
+    views_30d_min: Optional[int] = None,
+    views_15d_min: Optional[int] = None,
+    views_7d_min: Optional[int] = None,
+    score_min: Optional[float] = None,
+    growth_min: Optional[float] = None,
+    limit: Optional[int] = 100,
+    offset: Optional[int] = 0
+):
+    """
+    Get APENAS nossos canais (tipo='nosso')
+    """
+    try:
+        canais = await db.get_canais_with_filters(
+            nicho=nicho,
+            subnicho=subnicho,
+            lingua=lingua,
+            tipo="nosso",  # FORÇA tipo='nosso'
+            views_60d_min=views_60d_min,
+            views_30d_min=views_30d_min,
+            views_15d_min=views_15d_min,
+            views_7d_min=views_7d_min,
+            score_min=score_min,
+            growth_min=growth_min,
+            limit=limit,
+            offset=offset
+        )
+        return {"canais": canais, "total": len(canais)}
+    except Exception as e:
+        logger.error(f"Error fetching nossos canais: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/videos")
 async def get_videos(
     nicho: Optional[str] = None,
     subnicho: Optional[str] = None,
-    lingua: Optional[str] = None,  # ADICIONADO: parâmetro lingua
+    lingua: Optional[str] = None,
     canal: Optional[str] = None,
-    periodo_publicacao: Optional[str] = "60d",  # 60d, 30d, 15d, 7d
+    periodo_publicacao: Optional[str] = "60d",
     views_min: Optional[int] = None,
     growth_min: Optional[float] = None,
-    order_by: Optional[str] = "views_atuais",  # views_atuais, growth_video, data_publicacao
+    order_by: Optional[str] = "views_atuais",
     limit: Optional[int] = 100,
     offset: Optional[int] = 0
 ):
@@ -109,7 +146,7 @@ async def get_videos(
         videos = await db.get_videos_with_filters(
             nicho=nicho,
             subnicho=subnicho,
-            lingua=lingua,  # ADICIONADO: passar lingua para a função
+            lingua=lingua,
             canal=canal,
             periodo_publicacao=periodo_publicacao,
             views_min=views_min,
@@ -141,11 +178,12 @@ async def add_canal_manual(
     url_canal: str,
     nicho: str,
     subnicho: str = "",
-    lingua: str = "English",  # ADICIONADO: parâmetro lingua com default
+    lingua: str = "English",
+    tipo: str = "minerado",  # ADICIONADO - por padrão é minerado
     status: str = "ativo"
 ):
     """
-    Add a canal manually (since sheets is disabled)
+    Add a canal manually
     """
     try:
         canal_data = {
@@ -153,7 +191,8 @@ async def add_canal_manual(
             'url_canal': url_canal,
             'nicho': nicho,
             'subnicho': subnicho,
-            'lingua': lingua,  # ADICIONADO: incluir lingua nos dados
+            'lingua': lingua,
+            'tipo': tipo,  # ADICIONADO
             'status': status
         }
         

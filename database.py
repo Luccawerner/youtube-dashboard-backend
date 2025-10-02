@@ -464,3 +464,28 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error fetching favoritos videos: {e}")
             raise
+
+    # ========================
+    # DELETE PERMANENTE - NOVA FUNÇÃO
+    # ========================
+
+    async def delete_canal_permanently(self, canal_id: int):
+        """Delete canal and all related data permanently"""
+        try:
+            # Delete videos first (foreign key constraint)
+            self.supabase.table("videos_historico").delete().eq("canal_id", canal_id).execute()
+            
+            # Delete canal data history
+            self.supabase.table("dados_canais_historico").delete().eq("canal_id", canal_id).execute()
+            
+            # Delete favorites
+            self.supabase.table("favoritos").delete().eq("tipo", "canal").eq("item_id", canal_id).execute()
+            
+            # Finally delete canal
+            self.supabase.table("canais_monitorados").delete().eq("id", canal_id).execute()
+            
+            logger.info(f"Permanently deleted canal_id {canal_id} and all related data")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting canal permanently: {e}")
+            raise

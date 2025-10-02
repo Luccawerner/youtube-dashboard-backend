@@ -227,7 +227,7 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================
-# FAVORITOS - NOVOS ENDPOINTS
+# FAVORITOS - ENDPOINTS
 # ========================
 
 @app.post("/api/favoritos/adicionar")
@@ -286,6 +286,35 @@ async def get_favoritos_videos():
         return {"videos": videos, "total": len(videos)}
     except Exception as e:
         logger.error(f"Error fetching favoritos videos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================
+# DELETE CANAL - NOVO ENDPOINT
+# ========================
+
+@app.delete("/api/canais/{canal_id}")
+async def delete_canal(canal_id: int, permanent: bool = False):
+    """
+    Delete or deactivate a canal
+    permanent=False: marca como inativo
+    permanent=True: deleta permanentemente
+    """
+    try:
+        if permanent:
+            await db.delete_canal_permanently(canal_id)
+            return {"message": "Canal deletado permanentemente"}
+        else:
+            # Just mark as inactive
+            canal_data = {
+                'id': canal_id,
+                'status': 'inativo'
+            }
+            response = db.supabase.table("canais_monitorados").update({
+                "status": "inativo"
+            }).eq("id", canal_id).execute()
+            return {"message": "Canal desativado", "canal": response.data}
+    except Exception as e:
+        logger.error(f"Error deleting canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Background tasks

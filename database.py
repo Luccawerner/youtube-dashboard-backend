@@ -37,7 +37,7 @@ class SupabaseClient:
                 "nicho": canal_data.get("nicho"),
                 "subnicho": canal_data.get("subnicho"),
                 "lingua": canal_data.get("lingua", "English"),
-                "tipo": canal_data.get("tipo", "minerado"),  # ADICIONADO
+                "tipo": canal_data.get("tipo", "minerado"),
                 "status": canal_data.get("status", "ativo")
             }).execute()
             
@@ -132,7 +132,7 @@ class SupabaseClient:
         nicho: Optional[str] = None,
         subnicho: Optional[str] = None,
         lingua: Optional[str] = None,
-        tipo: Optional[str] = None,  # ADICIONADO
+        tipo: Optional[str] = None,
         views_60d_min: Optional[int] = None,
         views_30d_min: Optional[int] = None,
         views_15d_min: Optional[int] = None,
@@ -154,8 +154,8 @@ class SupabaseClient:
                 query = query.eq("subnicho", subnicho)
             if lingua:
                 query = query.eq("lingua", lingua)
-            if tipo:  # ADICIONADO
-                query = query.eq("tipo", tipo)  # ADICIONADO
+            if tipo:
+                query = query.eq("tipo", tipo)
             if views_60d_min:
                 query = query.gte("views_60d", views_60d_min)
             if views_30d_min:
@@ -194,8 +194,8 @@ class SupabaseClient:
                 query = query.eq("subnicho", subnicho)
             if lingua:
                 query = query.eq("lingua", lingua)
-            if tipo:  # ADICIONADO
-                query = query.eq("tipo", tipo)  # ADICIONADO
+            if tipo:
+                query = query.eq("tipo", tipo)
             
             response = query.execute()
             
@@ -209,7 +209,7 @@ class SupabaseClient:
                     "nicho": item["nicho"],
                     "subnicho": item["subnicho"],
                     "lingua": item.get("lingua", "N/A"),
-                    "tipo": item.get("tipo", "minerado"),  # ADICIONADO
+                    "tipo": item.get("tipo", "minerado"),
                     "status": item["status"]
                 }
                 
@@ -377,4 +377,90 @@ class SupabaseClient:
             logger.info(f"Cleaned up old data before {cutoff_date}")
         except Exception as e:
             logger.error(f"Error cleaning up old data: {e}")
+            raise
+
+    # ========================
+    # FAVORITOS - NOVAS FUNÇÕES
+    # ========================
+
+    async def add_favorito(self, tipo: str, item_id: int) -> Dict:
+        """Add item to favorites"""
+        try:
+            response = self.supabase.table("favoritos").upsert({
+                "tipo": tipo,
+                "item_id": item_id
+            }).execute()
+            
+            logger.info(f"Added favorito: tipo={tipo}, item_id={item_id}")
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error adding favorito: {e}")
+            raise
+
+    async def remove_favorito(self, tipo: str, item_id: int):
+        """Remove item from favorites"""
+        try:
+            response = self.supabase.table("favoritos").delete().eq("tipo", tipo).eq("item_id", item_id).execute()
+            logger.info(f"Removed favorito: tipo={tipo}, item_id={item_id}")
+            return response.data
+        except Exception as e:
+            logger.error(f"Error removing favorito: {e}")
+            raise
+
+    async def get_favoritos_canais(self) -> List[Dict]:
+        """Get favorited channels with full data"""
+        try:
+            # Buscar IDs dos canais favoritados
+            favoritos_response = self.supabase.table("favoritos").select("item_id").eq("tipo", "canal").execute()
+            
+            if not favoritos_response.data:
+                return []
+            
+            canal_ids = [fav["item_id"] for fav in favoritos_response.data]
+            
+            # Buscar dados completos dos canais
+            canais = await self.get_canais_with_filters(limit=1000)
+            
+            # Filtrar apenas os favoritados
+            canais_favoritos = [c for c in canais if c["id"] in canal_ids]
+            
+            logger.info(f"Retrieved {len(canais_favoritos)} favorited channels")
+            return canais_favoritos
+        except Exception as e:
+            logger.error(f"Error fetching favoritos canais: {e}")
+            raise
+
+    async def get_favoritos_videos(self) -> List[Dict]:
+        """Get favorited videos with full data"""
+        try:
+            # Buscar IDs dos vídeos favoritados
+            favoritos_response = self.supabase.table("favoritos").select("item_id").eq("tipo", "video").execute()
+            
+            if not favoritos_response.data:
+                return []
+            
+            video_ids = [fav["item_id"] for fav in favoritos_response.data]
+            
+            # Buscar dados completos dos vídeos
+            videos_response = self.supabase.table("videos_historico").select("*").in_("id", video_ids).execute()
+            videos = videos_response.data
+            
+            # Buscar informações dos canais
+            if videos:
+                canal_ids = list(set(v["canal_id"] for v in videos))
+                canais_response = self.supabase.table("canais_monitorados").select("*").in_("id", canal_ids).execute()
+                canais_dict = {c["id"]: c for c in canais_response.data}
+                
+                # Adicionar informações do canal a cada vídeo
+                for video in videos:
+                    canal_info = canais_dict.get(video["canal_id"], {})
+                    video["nome_canal"] = canal_info.get("nome_canal", "Unknown")
+                    video["nicho"] = canal_info.get("nicho", "Unknown")
+                    video["subnicho"] = canal_info.get("subnicho", "Unknown")
+                    video["lingua"] = canal_info.get("lingua", "N/A")
+            
+            logger.info(f"Retrieved {len(videos)} favorited videos")
+            return videos
+        except Exception as e:
+            logger.error(f"Error fetching favoritos videos: {e}")
             raise

@@ -380,13 +380,21 @@ class SupabaseClient:
             raise
 
     # ========================
-    # FAVORITOS - NOVAS FUNÇÕES
+    # FAVORITOS - FUNÇÕES CORRIGIDAS
     # ========================
 
     async def add_favorito(self, tipo: str, item_id: int) -> Dict:
-        """Add item to favorites"""
+        """Add item to favorites (ignora se já existe)"""
         try:
-            response = self.supabase.table("favoritos").upsert({
+            # Verificar se já existe
+            existing = self.supabase.table("favoritos").select("*").eq("tipo", tipo).eq("item_id", item_id).execute()
+            
+            if existing.data:
+                logger.info(f"Favorito já existe: tipo={tipo}, item_id={item_id}")
+                return existing.data[0]
+            
+            # Se não existe, adicionar
+            response = self.supabase.table("favoritos").insert({
                 "tipo": tipo,
                 "item_id": item_id
             }).execute()
@@ -466,7 +474,7 @@ class SupabaseClient:
             raise
 
     # ========================
-    # DELETE PERMANENTE - NOVA FUNÇÃO
+    # DELETE PERMANENTE
     # ========================
 
     async def delete_canal_permanently(self, canal_id: int):

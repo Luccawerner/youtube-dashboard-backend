@@ -238,14 +238,32 @@ async def add_favorito(tipo: str, item_id: int):
     item_id: ID do canal ou vídeo
     """
     try:
+        logger.info(f"Tentando adicionar favorito: tipo={tipo}, item_id={item_id}")
+        
         if tipo not in ["canal", "video"]:
             raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
         
+        # Verificar se o item existe antes de adicionar
+        if tipo == "canal":
+            canal_exists = db.supabase.table("canais_monitorados").select("id").eq("id", item_id).execute()
+            if not canal_exists.data:
+                logger.error(f"Canal {item_id} não encontrado")
+                raise HTTPException(status_code=404, detail="Canal não encontrado")
+        elif tipo == "video":
+            video_exists = db.supabase.table("videos_historico").select("id").eq("id", item_id).execute()
+            if not video_exists.data:
+                logger.error(f"Video {item_id} não encontrado")
+                raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+        
         result = await db.add_favorito(tipo, item_id)
+        logger.info(f"Favorito adicionado com sucesso: {result}")
         return {"message": "Favorito adicionado com sucesso", "favorito": result}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error adding favorito: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Tipo: {tipo}, Item ID: {item_id}")
+        raise HTTPException(status_code=500, detail=f"Erro ao adicionar favorito: {str(e)}")
 
 @app.delete("/api/favoritos/remover")
 async def remove_favorito(tipo: str, item_id: int):
@@ -289,7 +307,7 @@ async def get_favoritos_videos():
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================
-# DELETE CANAL - NOVO ENDPOINT
+# DELETE CANAL - ENDPOINT
 # ========================
 
 @app.delete("/api/canais/{canal_id}")
@@ -305,10 +323,6 @@ async def delete_canal(canal_id: int, permanent: bool = False):
             return {"message": "Canal deletado permanentemente"}
         else:
             # Just mark as inactive
-            canal_data = {
-                'id': canal_id,
-                'status': 'inativo'
-            }
             response = db.supabase.table("canais_monitorados").update({
                 "status": "inativo"
             }).eq("id", canal_id).execute()

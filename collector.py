@@ -35,8 +35,17 @@ class YouTubeCollector:
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         logger.info(f"Rotated to API key {self.current_key_index + 1}")
 
+    def clean_youtube_url(self, url: str) -> str:
+        """Remove extra paths from YouTube URL"""
+        # Remove /videos, /channel-analytics, /about, etc
+        url = re.sub(r'/(videos|channel-analytics|about|featured|playlists|community|channels|streams|shorts).*$', '', url)
+        return url
+
     def extract_channel_id(self, url: str) -> Optional[str]:
         """Extract channel ID from YouTube URL"""
+        # Clean URL first
+        url = self.clean_youtube_url(url)
+        
         patterns = [
             r'youtube\.com/channel/([a-zA-Z0-9_-]+)',
             r'youtube\.com/c/([a-zA-Z0-9_-]+)',
@@ -321,6 +330,9 @@ class YouTubeCollector:
     async def get_canal_data(self, url_canal: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
         try:
+            # Clean URL first
+            url_canal = self.clean_youtube_url(url_canal)
+            
             # Extract channel ID
             channel_id = self.extract_channel_id(url_canal)
             
@@ -374,6 +386,9 @@ class YouTubeCollector:
     async def get_videos_data(self, url_canal: str) -> Optional[List[Dict[str, Any]]]:
         """Get videos data for a canal"""
         try:
+            # Clean URL first
+            url_canal = self.clean_youtube_url(url_canal)
+            
             # Extract channel ID
             channel_id = self.extract_channel_id(url_canal)
             

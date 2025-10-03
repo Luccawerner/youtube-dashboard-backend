@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
 import aiohttp
 import json
@@ -140,7 +140,7 @@ class YouTubeCollector:
         try:
             videos = []
             page_token = None
-            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
             
             async with aiohttp.ClientSession() as session:
                 while True:
@@ -152,7 +152,7 @@ class YouTubeCollector:
                         'type': 'video',
                         'order': 'date',
                         'maxResults': 50,
-                        'publishedAfter': cutoff_date.isoformat() + 'Z',
+                        'publishedAfter': cutoff_date.isoformat(),
                         'key': self.get_current_api_key()
                     }
                     
@@ -286,9 +286,17 @@ class YouTubeCollector:
         """Calculate views for different periods"""
         views_60d = views_30d = views_15d = views_7d = 0
         
+        # Ensure current_date has timezone
+        if current_date.tzinfo is None:
+            current_date = current_date.replace(tzinfo=timezone.utc)
+        
         for video in videos:
             try:
-                pub_date = datetime.fromisoformat(video['data_publicacao'].replace('Z', '+00:00'))
+                # Parse the date string from YouTube API
+                pub_date_str = video['data_publicacao']
+                # YouTube API returns ISO format with Z (UTC)
+                pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
+                
                 days_ago = (current_date - pub_date).days
                 
                 if days_ago <= 60:
@@ -299,7 +307,8 @@ class YouTubeCollector:
                     views_15d += video['views_atuais']
                 if days_ago <= 7:
                     views_7d += video['views_atuais']
-            except:
+            except Exception as e:
+                logger.error(f"Error calculating views for video: {e}")
                 continue
         
         return {
@@ -332,12 +341,19 @@ class YouTubeCollector:
             # Get videos from last 60 days
             videos = await self.get_channel_videos(channel_id, days=60)
             
-            # Calculate views by period
-            current_date = datetime.now()
+            # Calculate views by period - use timezone-aware datetime
+            current_date = datetime.now(timezone.utc)
             views_by_period = self.calculate_views_by_period(videos, current_date)
             
             # Count videos published in last 7 days
-            videos_7d = len([v for v in videos if (current_date - datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))).days <= 7])
+            videos_7d = 0
+            for v in videos:
+                try:
+                    pub_date = datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))
+                    if (current_date - pub_date).days <= 7:
+                        videos_7d += 1
+                except:
+                    continue
             
             # Calculate engagement rate (simplified)
             total_engagement = sum(v['likes'] + v['comentarios'] for v in videos)

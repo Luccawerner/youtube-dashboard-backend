@@ -48,16 +48,12 @@ class SupabaseClient:
             raise
 
     async def get_canais_for_collection(self) -> List[Dict]:
-        """Get canais that need data collection (new or >3 days old)"""
+        """Get ALL active canais for daily collection"""
         try:
-            # Calculate 3 days ago
-            three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
+            # MODIFICADO: Coletar TODOS os canais ativos TODOS OS DIAS
+            response = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo").execute()
             
-            response = self.supabase.table("canais_monitorados").select("*").or_(
-                f"ultima_coleta.is.null,ultima_coleta.lt.{three_days_ago}"
-            ).eq("status", "ativo").execute()
-            
-            logger.info(f"Found {len(response.data)} canais needing collection")
+            logger.info(f"Found {len(response.data)} canais needing collection (ALL active canais)")
             return response.data
         except Exception as e:
             logger.error(f"Error getting canais for collection: {e}")
@@ -379,10 +375,6 @@ class SupabaseClient:
             logger.error(f"Error cleaning up old data: {e}")
             raise
 
-    # ========================
-    # FAVORITOS - FUNÇÕES CORRIGIDAS
-    # ========================
-
     async def add_favorito(self, tipo: str, item_id: int) -> Dict:
         """Add item to favorites (ignora se já existe)"""
         try:
@@ -472,10 +464,6 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error fetching favoritos videos: {e}")
             raise
-
-    # ========================
-    # DELETE PERMANENTE
-    # ========================
 
     async def delete_canal_permanently(self, canal_id: int):
         """Delete canal and all related data permanently"""

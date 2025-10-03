@@ -137,16 +137,10 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get canais with filters - retorna TODOS os canais, com ou sem métricas"""
+        """Get canais with filters - busca em 2 etapas para garantir dados"""
         try:
-            # Query direta com LEFT JOIN para pegar TODOS os canais
-            query = self.supabase.table("canais_monitorados").select("""
-                *,
-                dados_canais_historico(
-                    views_60d, views_30d, views_15d, views_7d,
-                    inscritos, engagement_rate, videos_publicados_7d
-                )
-            """).eq("status", "ativo")
+            # ETAPA 1: Buscar todos os canais ativos
+            query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
             
             if nicho:
                 query = query.eq("nicho", nicho)
@@ -157,11 +151,24 @@ class SupabaseClient:
             if tipo:
                 query = query.eq("tipo", tipo)
             
-            response = query.execute()
+            canais_response = query.execute()
             
-            # Processar dados para incluir métricas
+            # ETAPA 2: Buscar TODOS os dados históricos de uma vez
+            historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
+            
+            # Criar dicionário de históricos por canal_id (pegar o mais recente de cada)
+            historico_dict = {}
+            for h in historico_response.data:
+                canal_id = h["canal_id"]
+                data_coleta = h.get("data_coleta", "")
+                
+                # Se não existe ou este é mais recente, substitui
+                if canal_id not in historico_dict or data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                    historico_dict[canal_id] = h
+            
+            # ETAPA 3: Combinar canais com seus históricos
             canais = []
-            for item in response.data:
+            for item in canais_response.data:
                 canal = {
                     "id": item["id"],
                     "nome_canal": item["nome_canal"],
@@ -172,7 +179,6 @@ class SupabaseClient:
                     "tipo": item.get("tipo", "minerado"),
                     "status": item["status"],
                     "ultima_coleta": item.get("ultima_coleta"),
-                    # Valores padrão caso não tenha dados
                     "views_60d": 0,
                     "views_30d": 0,
                     "views_15d": 0,
@@ -185,20 +191,19 @@ class SupabaseClient:
                     "growth_7d": 0
                 }
                 
-                # Se tiver dados históricos, sobrescrever os valores
-                if item.get("dados_canais_historico") and len(item["dados_canais_historico"]) > 0:
-                    # Pegar o registro mais recente
-                    historico = item["dados_canais_historico"][-1] if isinstance(item["dados_canais_historico"], list) else item["dados_canais_historico"]
+                # Se tem histórico, preenche com dados reais
+                if item["id"] in historico_dict:
+                    h = historico_dict[item["id"]]
                     
-                    canal["views_60d"] = historico.get("views_60d", 0) or 0
-                    canal["views_30d"] = historico.get("views_30d", 0) or 0
-                    canal["views_15d"] = historico.get("views_15d", 0) or 0
-                    canal["views_7d"] = historico.get("views_7d", 0) or 0
-                    canal["inscritos"] = historico.get("inscritos", 0) or 0
-                    canal["engagement_rate"] = historico.get("engagement_rate", 0.0) or 0.0
-                    canal["videos_publicados_7d"] = historico.get("videos_publicados_7d", 0) or 0
+                    canal["views_60d"] = h.get("views_60d") or 0
+                    canal["views_30d"] = h.get("views_30d") or 0
+                    canal["views_15d"] = h.get("views_15d") or 0
+                    canal["views_7d"] = h.get("views_7d") or 0
+                    canal["inscritos"] = h.get("inscritos") or 0
+                    canal["engagement_rate"] = h.get("engagement_rate") or 0.0
+                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d") or 0
                     
-                    # Calcular score apenas se tiver inscritos
+                    # Calcular score
                     if canal["inscritos"] > 0:
                         score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + \
                                ((canal["views_7d"] / canal["inscritos"]) * 0.3)
@@ -206,18 +211,20 @@ class SupabaseClient:
                     
                     # Calcular growth
                     if canal["views_30d"] > 0 and canal["views_60d"] > 0:
-                        growth = (((canal["views_30d"] - (canal["views_60d"] - canal["views_30d"])) / 
-                                  (canal["views_60d"] - canal["views_30d"])) * 100)
-                        canal["growth_30d"] = round(growth, 2)
+                        views_anterior_30d = canal["views_60d"] - canal["views_30d"]
+                        if views_anterior_30d > 0:
+                            growth = ((canal["views_30d"] - views_anterior_30d) / views_anterior_30d) * 100
+                            canal["growth_30d"] = round(growth, 2)
                     
                     if canal["views_7d"] > 0 and canal["views_15d"] > 0:
-                        growth = (((canal["views_7d"] - (canal["views_15d"] - canal["views_7d"])) / 
-                                  (canal["views_15d"] - canal["views_7d"])) * 100)
-                        canal["growth_7d"] = round(growth, 2)
-                    
+                        views_anterior_7d = canal["views_15d"] - canal["views_7d"]
+                        if views_anterior_7d > 0:
+                            growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
+                            canal["growth_7d"] = round(growth, 2)
+                
                 canais.append(canal)
             
-            # Aplicar filtros de valores mínimos
+            # Aplicar filtros
             if views_60d_min:
                 canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
             if views_30d_min:
@@ -231,10 +238,10 @@ class SupabaseClient:
             if growth_min:
                 canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
             
-            # Ordenar por score (maiores primeiro)
+            # Ordenar por score
             canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
             
-            # Aplicar paginação
+            # Paginação
             return canais[offset:offset + limit]
             
         except Exception as e:
@@ -254,7 +261,7 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get videos with filters for Funcionalidade 2"""
+        """Get videos with filters"""
         try:
             days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
             days = days_map.get(periodo_publicacao, 60)

@@ -24,6 +24,7 @@ class YouTubeCollector:
         
         self.current_key_index = 0
         self.base_url = "https://www.googleapis.com/youtube/v3"
+        self.max_retries = 3
         logger.info(f"YouTube collector initialized with {len(self.api_keys)} API keys")
 
     def get_current_api_key(self) -> str:
@@ -37,13 +38,11 @@ class YouTubeCollector:
 
     def clean_youtube_url(self, url: str) -> str:
         """Remove extra paths from YouTube URL"""
-        # Remove /videos, /channel-analytics, /about, etc
         url = re.sub(r'/(videos|channel-analytics|about|featured|playlists|community|channels|streams|shorts).*$', '', url)
         return url
 
     def extract_channel_id(self, url: str) -> Optional[str]:
         """Extract channel ID from YouTube URL"""
-        # Clean URL first
         url = self.clean_youtube_url(url)
         
         patterns = [
@@ -61,30 +60,19 @@ class YouTubeCollector:
         return None
 
     async def get_channel_id_from_username(self, username: str) -> Optional[str]:
-        """Get channel ID from username/handle"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                # Try with @ handle first
-                if username.startswith('@'):
-                    username = username[1:]
-                
-                url = f"{self.base_url}/channels"
-                params = {
-                    'part': 'id',
-                    'forHandle': username,
-                    'key': self.get_current_api_key()
-                }
-                
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('items'):
-                            return data['items'][0]['id']
+        """Get channel ID from username/handle with retry limit"""
+        retry_count = 0
+        
+        while retry_count < self.max_retries:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    if username.startswith('@'):
+                        username = username[1:]
                     
-                    # If handle doesn't work, try forUsername
+                    url = f"{self.base_url}/channels"
                     params = {
                         'part': 'id',
-                        'forUsername': username,
+                        'forHandle': username,
                         'key': self.get_current_api_key()
                     }
                     
@@ -94,66 +82,97 @@ class YouTubeCollector:
                             if data.get('items'):
                                 return data['items'][0]['id']
                         
-                        elif response.status == 403:
-                            # Quota exceeded, try next key
-                            self.rotate_api_key()
-                            return await self.get_channel_id_from_username(username)
-        
-        except Exception as e:
-            logger.error(f"Error getting channel ID for {username}: {e}")
+                        params = {
+                            'part': 'id',
+                            'forUsername': username,
+                            'key': self.get_current_api_key()
+                        }
+                        
+                        async with session.get(url, params=params) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                if data.get('items'):
+                                    return data['items'][0]['id']
+                            
+                            elif response.status == 403:
+                                retry_count += 1
+                                if retry_count < self.max_retries:
+                                    self.rotate_api_key()
+                                    await asyncio.sleep(1)
+                                    continue
+                                else:
+                                    logger.error(f"Max retries reached for username {username}")
+                                    return None
+                            else:
+                                return None
+            
+            except Exception as e:
+                logger.error(f"Error getting channel ID for {username}: {e}")
+                return None
         
         return None
 
     async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
-        """Get basic channel information"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/channels"
-                params = {
-                    'part': 'statistics,snippet',
-                    'id': channel_id,
-                    'key': self.get_current_api_key()
-                }
-                
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('items'):
-                            channel = data['items'][0]
-                            stats = channel.get('statistics', {})
-                            snippet = channel.get('snippet', {})
-                            
-                            return {
-                                'channel_id': channel_id,
-                                'title': snippet.get('title'),
-                                'subscriber_count': int(stats.get('subscriberCount', 0)),
-                                'video_count': int(stats.get('videoCount', 0)),
-                                'view_count': int(stats.get('viewCount', 0))
-                            }
-                    
-                    elif response.status == 403:
-                        # Quota exceeded
-                        self.rotate_api_key()
-                        return await self.get_channel_info(channel_id)
-                    
-                    else:
-                        logger.error(f"Error getting channel info: {response.status}")
+        """Get basic channel information with retry limit"""
+        retry_count = 0
         
-        except Exception as e:
-            logger.error(f"Error getting channel info for {channel_id}: {e}")
+        while retry_count < self.max_retries:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.base_url}/channels"
+                    params = {
+                        'part': 'statistics,snippet',
+                        'id': channel_id,
+                        'key': self.get_current_api_key()
+                    }
+                    
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data.get('items'):
+                                channel = data['items'][0]
+                                stats = channel.get('statistics', {})
+                                snippet = channel.get('snippet', {})
+                                
+                                return {
+                                    'channel_id': channel_id,
+                                    'title': snippet.get('title'),
+                                    'subscriber_count': int(stats.get('subscriberCount', 0)),
+                                    'video_count': int(stats.get('videoCount', 0)),
+                                    'view_count': int(stats.get('viewCount', 0))
+                                }
+                            else:
+                                return None
+                        
+                        elif response.status == 403:
+                            retry_count += 1
+                            if retry_count < self.max_retries:
+                                self.rotate_api_key()
+                                await asyncio.sleep(1)
+                                continue
+                            else:
+                                logger.error(f"Max retries reached for channel {channel_id}")
+                                return None
+                        else:
+                            logger.error(f"Error getting channel info: {response.status}")
+                            return None
+            
+            except Exception as e:
+                logger.error(f"Error getting channel info for {channel_id}: {e}")
+                return None
         
         return None
 
     async def get_channel_videos(self, channel_id: str, days: int = 60) -> List[Dict[str, Any]]:
-        """Get videos from a channel within specified days"""
+        """Get videos from a channel within specified days with retry limit"""
         try:
             videos = []
             page_token = None
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            retry_count = 0
             
             async with aiohttp.ClientSession() as session:
                 while True:
-                    # Get video IDs from channel
                     url = f"{self.base_url}/search"
                     params = {
                         'part': 'id,snippet',
@@ -177,7 +196,6 @@ class YouTubeCollector:
                             if not data.get('items'):
                                 break
                             
-                            # Get video details
                             video_ids = [item['id']['videoId'] for item in data['items']]
                             video_details = await self.get_video_details(video_ids)
                             
@@ -194,19 +212,23 @@ class YouTubeCollector:
                                         'duracao': details.get('duration_seconds', 0)
                                     }
                                     videos.append(video_info)
-                                    logger.debug(f"Added video: {video_info['titulo']} - Published: {video_info['data_publicacao']}")
                             
                             page_token = data.get('nextPageToken')
                             if not page_token:
                                 break
                             
-                            # Small delay to avoid rate limiting
+                            retry_count = 0
                             await asyncio.sleep(0.1)
                         
                         elif response.status == 403:
-                            # Quota exceeded
-                            self.rotate_api_key()
-                            continue
+                            retry_count += 1
+                            if retry_count < self.max_retries:
+                                self.rotate_api_key()
+                                await asyncio.sleep(2)
+                                continue
+                            else:
+                                logger.error(f"Max retries reached for channel {channel_id}")
+                                break
                         
                         else:
                             logger.error(f"Error getting videos: {response.status}")
@@ -220,51 +242,58 @@ class YouTubeCollector:
             return []
 
     async def get_video_details(self, video_ids: List[str]) -> List[Optional[Dict[str, Any]]]:
-        """Get detailed video statistics"""
+        """Get detailed video statistics with retry limit"""
         try:
             if not video_ids:
                 return []
             
             details = []
             
-            # Process in batches of 50 (API limit)
             for i in range(0, len(video_ids), 50):
                 batch_ids = video_ids[i:i+50]
+                retry_count = 0
                 
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/videos"
-                    params = {
-                        'part': 'statistics,contentDetails',
-                        'id': ','.join(batch_ids),
-                        'key': self.get_current_api_key()
-                    }
-                    
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            for item in data.get('items', []):
-                                stats = item.get('statistics', {})
-                                content = item.get('contentDetails', {})
+                while retry_count < self.max_retries:
+                    async with aiohttp.ClientSession() as session:
+                        url = f"{self.base_url}/videos"
+                        params = {
+                            'part': 'statistics,contentDetails',
+                            'id': ','.join(batch_ids),
+                            'key': self.get_current_api_key()
+                        }
+                        
+                        async with session.get(url, params=params) as response:
+                            if response.status == 200:
+                                data = await response.json()
                                 
-                                video_detail = {
-                                    'view_count': int(stats.get('viewCount', 0)),
-                                    'like_count': int(stats.get('likeCount', 0)),
-                                    'comment_count': int(stats.get('commentCount', 0)),
-                                    'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
-                                }
-                                details.append(video_detail)
-                        
-                        elif response.status == 403:
-                            # Quota exceeded
-                            self.rotate_api_key()
-                            return await self.get_video_details(video_ids)
-                        
-                        else:
-                            # Add None for failed requests
-                            details.extend([None] * len(batch_ids))
+                                for item in data.get('items', []):
+                                    stats = item.get('statistics', {})
+                                    content = item.get('contentDetails', {})
+                                    
+                                    video_detail = {
+                                        'view_count': int(stats.get('viewCount', 0)),
+                                        'like_count': int(stats.get('likeCount', 0)),
+                                        'comment_count': int(stats.get('commentCount', 0)),
+                                        'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
+                                    }
+                                    details.append(video_detail)
+                                break
+                            
+                            elif response.status == 403:
+                                retry_count += 1
+                                if retry_count < self.max_retries:
+                                    self.rotate_api_key()
+                                    await asyncio.sleep(1)
+                                    continue
+                                else:
+                                    logger.error(f"Max retries reached for video details")
+                                    details.extend([None] * len(batch_ids))
+                                    break
+                            
+                            else:
+                                details.extend([None] * len(batch_ids))
+                                break
                 
-                # Small delay between batches
                 await asyncio.sleep(0.1)
             
             return details
@@ -276,7 +305,6 @@ class YouTubeCollector:
     def parse_duration(self, duration_str: str) -> int:
         """Parse YouTube duration format to seconds"""
         try:
-            # Parse ISO 8601 duration (PT1H2M3S)
             import re
             pattern = r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?'
             match = re.match(pattern, duration_str)
@@ -295,15 +323,12 @@ class YouTubeCollector:
         """Calculate views for different periods"""
         views_60d = views_30d = views_15d = views_7d = 0
         
-        # Ensure current_date has timezone
         if current_date.tzinfo is None:
             current_date = current_date.replace(tzinfo=timezone.utc)
         
         for video in videos:
             try:
-                # Parse the date string from YouTube API
                 pub_date_str = video['data_publicacao']
-                # YouTube API returns ISO format with Z (UTC)
                 pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
                 
                 days_ago = (current_date - pub_date).days
@@ -330,14 +355,10 @@ class YouTubeCollector:
     async def get_canal_data(self, url_canal: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
         try:
-            # Clean URL first
             url_canal = self.clean_youtube_url(url_canal)
-            
-            # Extract channel ID
             channel_id = self.extract_channel_id(url_canal)
             
             if not channel_id:
-                # Try to get ID from username/handle
                 username = url_canal.split('/')[-1]
                 channel_id = await self.get_channel_id_from_username(username)
             
@@ -345,19 +366,15 @@ class YouTubeCollector:
                 logger.error(f"Could not extract channel ID from URL: {url_canal}")
                 return None
             
-            # Get channel info
             channel_info = await self.get_channel_info(channel_id)
             if not channel_info:
                 return None
             
-            # Get videos from last 60 days
             videos = await self.get_channel_videos(channel_id, days=60)
             
-            # Calculate views by period - use timezone-aware datetime
             current_date = datetime.now(timezone.utc)
             views_by_period = self.calculate_views_by_period(videos, current_date)
             
-            # Count videos published in last 7 days
             videos_7d = 0
             for v in videos:
                 try:
@@ -367,7 +384,6 @@ class YouTubeCollector:
                 except:
                     continue
             
-            # Calculate engagement rate (simplified)
             total_engagement = sum(v['likes'] + v['comentarios'] for v in videos)
             total_views = sum(v['views_atuais'] for v in videos)
             engagement_rate = (total_engagement / total_views * 100) if total_views > 0 else 0
@@ -386,14 +402,10 @@ class YouTubeCollector:
     async def get_videos_data(self, url_canal: str) -> Optional[List[Dict[str, Any]]]:
         """Get videos data for a canal"""
         try:
-            # Clean URL first
             url_canal = self.clean_youtube_url(url_canal)
-            
-            # Extract channel ID
             channel_id = self.extract_channel_id(url_canal)
             
             if not channel_id:
-                # Try to get ID from username/handle
                 username = url_canal.split('/')[-1]
                 channel_id = await self.get_channel_id_from_username(username)
             
@@ -401,7 +413,6 @@ class YouTubeCollector:
                 logger.error(f"Could not extract channel ID from URL: {url_canal}")
                 return None
             
-            # Get videos from last 60 days
             videos = await self.get_channel_videos(channel_id, days=60)
             return videos
         

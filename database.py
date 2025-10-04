@@ -149,7 +149,7 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get canais with filters - busca em 2 etapas para garantir dados"""
+        """Get canais with filters - VERSÃO CORRIGIDA"""
         try:
             # ETAPA 1: Buscar todos os canais ativos
             query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
@@ -164,21 +164,33 @@ class SupabaseClient:
                 query = query.eq("tipo", tipo)
             
             canais_response = query.execute()
+            logger.info(f"DEBUG: Encontrados {len(canais_response.data)} canais ativos")
             
-            # ETAPA 2: Buscar TODOS os dados históricos de uma vez
-            historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
+            # ETAPA 2: Buscar dados históricos APENAS dos últimos 3 dias
+            cutoff_date = (datetime.now() - timedelta(days=3)).date().isoformat()
+            historico_response = self.supabase.table("dados_canais_historico")\
+                .select("*")\
+                .gte("data_coleta", cutoff_date)\
+                .execute()
             
-            # Criar dicionário de históricos por canal_id (pegar o mais recente de cada)
+            logger.info(f"DEBUG: Encontrados {len(historico_response.data)} registros históricos recentes")
+            
+            # ETAPA 3: Criar dicionário de históricos por canal_id
             historico_dict = {}
             for h in historico_response.data:
                 canal_id = h["canal_id"]
                 data_coleta = h.get("data_coleta", "")
                 
-                # Se não existe ou este é mais recente, substitui
-                if canal_id not in historico_dict or data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                if canal_id not in historico_dict:
                     historico_dict[canal_id] = h
+                    logger.info(f"DEBUG: Adicionado histórico inicial para canal_id {canal_id}: views_30d={h.get('views_30d')}, views_7d={h.get('views_7d')}")
+                elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                    historico_dict[canal_id] = h
+                    logger.info(f"DEBUG: Atualizado histórico para canal_id {canal_id}: views_30d={h.get('views_30d')}, views_7d={h.get('views_7d')}")
             
-            # ETAPA 3: Combinar canais com seus históricos
+            logger.info(f"DEBUG: Dicionário de históricos criado com {len(historico_dict)} canais")
+            
+            # ETAPA 4: Combinar canais com seus históricos
             canais = []
             for item in canais_response.data:
                 canal = {
@@ -207,13 +219,15 @@ class SupabaseClient:
                 if item["id"] in historico_dict:
                     h = historico_dict[item["id"]]
                     
-                    canal["views_60d"] = h.get("views_60d") or 0
-                    canal["views_30d"] = h.get("views_30d") or 0
-                    canal["views_15d"] = h.get("views_15d") or 0
-                    canal["views_7d"] = h.get("views_7d") or 0
-                    canal["inscritos"] = h.get("inscritos") or 0
-                    canal["engagement_rate"] = h.get("engagement_rate") or 0.0
-                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d") or 0
+                    canal["views_60d"] = h.get("views_60d", 0)
+                    canal["views_30d"] = h.get("views_30d", 0)
+                    canal["views_15d"] = h.get("views_15d", 0)
+                    canal["views_7d"] = h.get("views_7d", 0)
+                    canal["inscritos"] = h.get("inscritos", 0)
+                    canal["engagement_rate"] = h.get("engagement_rate", 0.0)
+                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
+                    
+                    logger.info(f"DEBUG: Canal '{canal['nome_canal']}' (id={canal['id']}): views_30d={canal['views_30d']}, views_7d={canal['views_7d']}, inscritos={canal['inscritos']}")
                     
                     # Calcular score
                     if canal["inscritos"] > 0:
@@ -233,6 +247,8 @@ class SupabaseClient:
                         if views_anterior_7d > 0:
                             growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
                             canal["growth_7d"] = round(growth, 2)
+                else:
+                    logger.warning(f"DEBUG: Nenhum histórico encontrado para canal '{canal['nome_canal']}' (id={item['id']})")
                 
                 canais.append(canal)
             
@@ -253,11 +269,15 @@ class SupabaseClient:
             # Ordenar por score
             canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
             
+            logger.info(f"DEBUG: Retornando {len(canais)} canais após filtros")
+            
             # Paginação
             return canais[offset:offset + limit]
             
         except Exception as e:
             logger.error(f"Error fetching canais with filters: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
 
     async def get_videos_with_filters(

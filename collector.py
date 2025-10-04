@@ -56,6 +56,8 @@ class YouTubeCollector:
         """
         Extract channel identifier from YouTube URL
         Returns: (identifier, type) where type is 'id', 'handle', 'username', or 'unknown'
+        
+        UPDATED: Now supports handles with dots, like @HER.VOICES
         """
         url = self.clean_youtube_url(url)
         
@@ -67,22 +69,23 @@ class YouTubeCollector:
                 logger.info(f"Found valid channel ID: {channel_id}")
                 return (channel_id, 'id')
         
-        # Try to match handle (@username)
-        handle_match = re.search(r'youtube\.com/@([a-zA-Z0-9_-]+)', url)
+        # Try to match handle (@username) - UPDATED REGEX TO INCLUDE DOTS
+        # Changed from [a-zA-Z0-9_-]+ to [a-zA-Z0-9._-]+ to include dots
+        handle_match = re.search(r'youtube\.com/@([a-zA-Z0-9._-]+)', url)
         if handle_match:
             handle = handle_match.group(1)
             logger.info(f"Found handle: @{handle}")
             return (handle, 'handle')
         
-        # Try to match custom URL (/c/username)
-        custom_match = re.search(r'youtube\.com/c/([a-zA-Z0-9_-]+)', url)
+        # Try to match custom URL (/c/username) - ALSO UPDATED
+        custom_match = re.search(r'youtube\.com/c/([a-zA-Z0-9._-]+)', url)
         if custom_match:
             username = custom_match.group(1)
             logger.info(f"Found custom URL: {username}")
             return (username, 'username')
         
-        # Try to match user URL (/user/username)
-        user_match = re.search(r'youtube\.com/user/([a-zA-Z0-9_-]+)', url)
+        # Try to match user URL (/user/username) - ALSO UPDATED
+        user_match = re.search(r'youtube\.com/user/([a-zA-Z0-9._-]+)', url)
         if user_match:
             username = user_match.group(1)
             logger.info(f"Found user URL: {username}")

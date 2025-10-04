@@ -13,7 +13,9 @@ class YouTubeCollector:
     def __init__(self):
         self.api_keys = [
             os.environ.get("YOUTUBE_API_KEY_1"),
-            os.environ.get("YOUTUBE_API_KEY_2")
+            os.environ.get("YOUTUBE_API_KEY_2"),
+            os.environ.get("YOUTUBE_API_KEY_3"),
+            os.environ.get("YOUTUBE_API_KEY_4")
         ]
         
         # Remove None values

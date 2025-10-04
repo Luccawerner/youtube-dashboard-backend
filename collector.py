@@ -15,7 +15,9 @@ class YouTubeCollector:
             os.environ.get("YOUTUBE_API_KEY_1"),
             os.environ.get("YOUTUBE_API_KEY_2"),
             os.environ.get("YOUTUBE_API_KEY_3"),
-            os.environ.get("YOUTUBE_API_KEY_4")
+            os.environ.get("YOUTUBE_API_KEY_4"),
+            os.environ.get("YOUTUBE_API_KEY_5"),
+            os.environ.get("YOUTUBE_API_KEY_6")
         ]
         
         # Remove None values

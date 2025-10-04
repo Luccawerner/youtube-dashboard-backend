@@ -166,14 +166,10 @@ class SupabaseClient:
             canais_response = query.execute()
             logger.info(f"DEBUG: Encontrados {len(canais_response.data)} canais ativos")
             
-            # ETAPA 2: Buscar dados históricos APENAS dos últimos 3 dias
-            cutoff_date = (datetime.now() - timedelta(days=3)).date().isoformat()
-            historico_response = self.supabase.table("dados_canais_historico")\
-                .select("*")\
-                .gte("data_coleta", cutoff_date)\
-                .execute()
+            # ETAPA 2: Buscar TODOS os dados históricos (CORRIGIDO - sem limite de dias)
+            historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
             
-            logger.info(f"DEBUG: Encontrados {len(historico_response.data)} registros históricos recentes")
+            logger.info(f"DEBUG: Encontrados {len(historico_response.data)} registros históricos")
             
             # ETAPA 3: Criar dicionário de históricos por canal_id
             historico_dict = {}

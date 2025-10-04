@@ -61,9 +61,14 @@ class SupabaseClient:
     async def save_canal_data(self, canal_id: int, data: Dict[str, Any]):
         """Save canal metrics data"""
         try:
+            data_coleta = datetime.now().date().isoformat()
+            
+            # Verificar se já existe registro para hoje
+            existing = self.supabase.table("dados_canais_historico").select("*").eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
+            
             canal_data = {
                 "canal_id": canal_id,
-                "data_coleta": datetime.now().date().isoformat(),
+                "data_coleta": data_coleta,
                 "views_60d": data.get("views_60d"),
                 "views_30d": data.get("views_30d"),
                 "views_15d": data.get("views_15d"),
@@ -73,8 +78,15 @@ class SupabaseClient:
                 "engagement_rate": data.get("engagement_rate", 0.0)
             }
             
-            response = self.supabase.table("dados_canais_historico").upsert(canal_data).execute()
-            logger.info(f"Canal data saved for canal_id {canal_id}")
+            if existing.data:
+                # Se já existe, faz UPDATE
+                response = self.supabase.table("dados_canais_historico").update(canal_data).eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
+                logger.info(f"Canal data UPDATED for canal_id {canal_id}")
+            else:
+                # Se não existe, faz INSERT
+                response = self.supabase.table("dados_canais_historico").insert(canal_data).execute()
+                logger.info(f"Canal data INSERTED for canal_id {canal_id}")
+            
             return response.data
         except Exception as e:
             logger.error(f"Error saving canal data: {e}")

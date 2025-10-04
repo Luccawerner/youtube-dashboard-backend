@@ -226,6 +226,18 @@ async def get_stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/cleanup")
+async def cleanup_data():
+    """
+    Limpar dados com mais de 60 dias manualmente
+    """
+    try:
+        await db.cleanup_old_data()
+        return {"message": "Cleanup concluído com sucesso", "status": "success"}
+    except Exception as e:
+        logger.error(f"Error in cleanup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ========================
 # FAVORITOS - ENDPOINTS
 # ========================

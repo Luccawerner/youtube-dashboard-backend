@@ -45,79 +45,160 @@ class YouTubeCollector:
         url = re.sub(r'/(videos|channel-analytics|about|featured|playlists|community|channels|streams|shorts).*$', '', url)
         return url
 
-    def extract_channel_id(self, url: str) -> Optional[str]:
-        """Extract channel ID from YouTube URL"""
+    def is_valid_channel_id(self, channel_id: str) -> bool:
+        """Check if a string is a valid YouTube channel ID (starts with UC and is 24 chars)"""
+        if not channel_id:
+            return False
+        # YouTube channel IDs start with UC and are typically 24 characters
+        return channel_id.startswith('UC') and len(channel_id) == 24
+
+    def extract_channel_identifier(self, url: str) -> tuple[Optional[str], str]:
+        """
+        Extract channel identifier from YouTube URL
+        Returns: (identifier, type) where type is 'id', 'handle', 'username', or 'unknown'
+        """
         url = self.clean_youtube_url(url)
         
-        patterns = [
-            r'youtube\.com/channel/([a-zA-Z0-9_-]+)',
-            r'youtube\.com/c/([a-zA-Z0-9_-]+)',
-            r'youtube\.com/@([a-zA-Z0-9_-]+)',
-            r'youtube\.com/user/([a-zA-Z0-9_-]+)'
-        ]
+        # Try to match channel ID (UC...)
+        channel_id_match = re.search(r'youtube\.com/channel/([a-zA-Z0-9_-]+)', url)
+        if channel_id_match:
+            channel_id = channel_id_match.group(1)
+            if self.is_valid_channel_id(channel_id):
+                logger.info(f"Found valid channel ID: {channel_id}")
+                return (channel_id, 'id')
         
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
+        # Try to match handle (@username)
+        handle_match = re.search(r'youtube\.com/@([a-zA-Z0-9_-]+)', url)
+        if handle_match:
+            handle = handle_match.group(1)
+            logger.info(f"Found handle: @{handle}")
+            return (handle, 'handle')
         
-        return None
+        # Try to match custom URL (/c/username)
+        custom_match = re.search(r'youtube\.com/c/([a-zA-Z0-9_-]+)', url)
+        if custom_match:
+            username = custom_match.group(1)
+            logger.info(f"Found custom URL: {username}")
+            return (username, 'username')
+        
+        # Try to match user URL (/user/username)
+        user_match = re.search(r'youtube\.com/user/([a-zA-Z0-9_-]+)', url)
+        if user_match:
+            username = user_match.group(1)
+            logger.info(f"Found user URL: {username}")
+            return (username, 'username')
+        
+        logger.warning(f"Could not extract identifier from URL: {url}")
+        return (None, 'unknown')
 
-    async def get_channel_id_from_username(self, username: str) -> Optional[str]:
-        """Get channel ID from username/handle with retry limit"""
+    async def get_channel_id_from_handle(self, handle: str) -> Optional[str]:
+        """Convert a handle (@username) to a proper channel ID (UC...)"""
         retry_count = 0
+        
+        # Remove @ if present
+        if handle.startswith('@'):
+            handle = handle[1:]
+        
+        logger.info(f"Attempting to convert handle '{handle}' to channel ID...")
         
         while retry_count < self.max_retries:
             try:
                 async with aiohttp.ClientSession() as session:
-                    if username.startswith('@'):
-                        username = username[1:]
-                    
+                    # Try with forHandle parameter
                     url = f"{self.base_url}/channels"
                     params = {
                         'part': 'id',
-                        'forHandle': username,
+                        'forHandle': handle,
                         'key': self.get_current_api_key()
                     }
                     
                     async with session.get(url, params=params) as response:
                         if response.status == 200:
                             data = await response.json()
-                            if data.get('items'):
-                                return data['items'][0]['id']
+                            if data.get('items') and len(data['items']) > 0:
+                                channel_id = data['items'][0]['id']
+                                logger.info(f"✅ Successfully converted handle '{handle}' to channel ID: {channel_id}")
+                                return channel_id
+                        elif response.status == 403:
+                            retry_count += 1
+                            if retry_count < self.max_retries:
+                                logger.warning(f"API key quota exceeded, rotating to next key...")
+                                self.rotate_api_key()
+                                await asyncio.sleep(1)
+                                continue
                         
+                        # If forHandle didn't work, try forUsername
+                        logger.info(f"forHandle failed, trying forUsername for '{handle}'...")
                         params = {
                             'part': 'id',
-                            'forUsername': username,
+                            'forUsername': handle,
                             'key': self.get_current_api_key()
                         }
                         
-                        async with session.get(url, params=params) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                if data.get('items'):
-                                    return data['items'][0]['id']
-                            
-                            elif response.status == 403:
+                        async with session.get(url, params=params) as response2:
+                            if response2.status == 200:
+                                data = await response2.json()
+                                if data.get('items') and len(data['items']) > 0:
+                                    channel_id = data['items'][0]['id']
+                                    logger.info(f"✅ Successfully converted username '{handle}' to channel ID: {channel_id}")
+                                    return channel_id
+                            elif response2.status == 403:
                                 retry_count += 1
                                 if retry_count < self.max_retries:
+                                    logger.warning(f"API key quota exceeded, rotating to next key...")
                                     self.rotate_api_key()
                                     await asyncio.sleep(1)
                                     continue
-                                else:
-                                    logger.error(f"Max retries reached for username {username}")
-                                    return None
-                            else:
-                                return None
+                        
+                        logger.error(f"❌ Could not convert handle/username '{handle}' to channel ID (both methods failed)")
+                        return None
             
             except Exception as e:
-                logger.error(f"Error getting channel ID for {username}: {e}")
+                logger.error(f"Error converting handle '{handle}' to channel ID: {e}")
+                retry_count += 1
+                if retry_count < self.max_retries:
+                    await asyncio.sleep(1)
+                else:
+                    return None
+        
+        return None
+
+    async def get_channel_id(self, url: str) -> Optional[str]:
+        """
+        Get a valid channel ID from any YouTube URL
+        This is the main function that handles all URL types
+        """
+        identifier, id_type = self.extract_channel_identifier(url)
+        
+        if not identifier:
+            logger.error(f"❌ Could not extract any identifier from URL: {url}")
+            return None
+        
+        # If it's already a valid ID, return it
+        if id_type == 'id' and self.is_valid_channel_id(identifier):
+            logger.info(f"✅ Already have valid channel ID: {identifier}")
+            return identifier
+        
+        # If it's a handle or username, convert it to ID
+        if id_type in ['handle', 'username']:
+            logger.info(f"🔄 Need to convert {id_type} '{identifier}' to channel ID...")
+            channel_id = await self.get_channel_id_from_handle(identifier)
+            if channel_id:
+                logger.info(f"✅ Conversion successful: {identifier} → {channel_id}")
+                return channel_id
+            else:
+                logger.error(f"❌ Failed to convert {id_type} '{identifier}' to channel ID")
                 return None
         
+        logger.error(f"❌ Unknown identifier type: {id_type}")
         return None
 
     async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
         """Get basic channel information with retry limit"""
+        if not self.is_valid_channel_id(channel_id):
+            logger.error(f"❌ Invalid channel ID format: {channel_id}")
+            return None
+        
         retry_count = 0
         
         while retry_count < self.max_retries:
@@ -169,6 +250,10 @@ class YouTubeCollector:
 
     async def get_channel_videos(self, channel_id: str, days: int = 60) -> List[Dict[str, Any]]:
         """Get videos from a channel within specified days with retry limit"""
+        if not self.is_valid_channel_id(channel_id):
+            logger.error(f"❌ Invalid channel ID format for get_channel_videos: {channel_id}")
+            return []
+        
         try:
             videos = []
             page_token = None
@@ -235,7 +320,8 @@ class YouTubeCollector:
                                 break
                         
                         else:
-                            logger.error(f"Error getting videos: {response.status}")
+                            error_text = await response.text()
+                            logger.error(f"Error getting videos (status {response.status}): {error_text}")
                             break
             
             logger.info(f"Retrieved {len(videos)} videos for channel {channel_id}")
@@ -359,19 +445,20 @@ class YouTubeCollector:
     async def get_canal_data(self, url_canal: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
         try:
-            url_canal = self.clean_youtube_url(url_canal)
-            channel_id = self.extract_channel_id(url_canal)
+            logger.info(f"🔍 Starting collection for URL: {url_canal}")
+            
+            # Get proper channel ID from URL
+            channel_id = await self.get_channel_id(url_canal)
             
             if not channel_id:
-                username = url_canal.split('/')[-1]
-                channel_id = await self.get_channel_id_from_username(username)
-            
-            if not channel_id:
-                logger.error(f"Could not extract channel ID from URL: {url_canal}")
+                logger.error(f"❌ Could not get channel ID from URL: {url_canal}")
                 return None
+            
+            logger.info(f"✅ Using channel ID: {channel_id}")
             
             channel_info = await self.get_channel_info(channel_id)
             if not channel_info:
+                logger.error(f"❌ Could not get channel info for {channel_id}")
                 return None
             
             videos = await self.get_channel_videos(channel_id, days=60)
@@ -392,34 +479,37 @@ class YouTubeCollector:
             total_views = sum(v['views_atuais'] for v in videos)
             engagement_rate = (total_engagement / total_views * 100) if total_views > 0 else 0
             
-            return {
+            result = {
                 'inscritos': channel_info['subscriber_count'],
                 'videos_publicados_7d': videos_7d,
                 'engagement_rate': round(engagement_rate, 2),
                 **views_by_period
             }
+            
+            logger.info(f"✅ Successfully collected data for channel {channel_id}: {result}")
+            return result
         
         except Exception as e:
-            logger.error(f"Error getting canal data for {url_canal}: {e}")
+            logger.error(f"❌ Error getting canal data for {url_canal}: {e}")
             return None
 
     async def get_videos_data(self, url_canal: str) -> Optional[List[Dict[str, Any]]]:
         """Get videos data for a canal"""
         try:
-            url_canal = self.clean_youtube_url(url_canal)
-            channel_id = self.extract_channel_id(url_canal)
+            logger.info(f"🔍 Getting videos for URL: {url_canal}")
+            
+            # Get proper channel ID from URL
+            channel_id = await self.get_channel_id(url_canal)
             
             if not channel_id:
-                username = url_canal.split('/')[-1]
-                channel_id = await self.get_channel_id_from_username(username)
-            
-            if not channel_id:
-                logger.error(f"Could not extract channel ID from URL: {url_canal}")
+                logger.error(f"❌ Could not get channel ID from URL: {url_canal}")
                 return None
+            
+            logger.info(f"✅ Using channel ID: {channel_id}")
             
             videos = await self.get_channel_videos(channel_id, days=60)
             return videos
         
         except Exception as e:
-            logger.error(f"Error getting videos data for {url_canal}: {e}")
+            logger.error(f"❌ Error getting videos data for {url_canal}: {e}")
             return None

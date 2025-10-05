@@ -238,6 +238,19 @@ async def cleanup_data():
         logger.error(f"Error in cleanup: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# NOVO ENDPOINT: Histórico de Coletas
+@app.get("/api/coletas/historico")
+async def get_coletas_historico(limit: Optional[int] = 20):
+    """
+    Get collection history
+    """
+    try:
+        historico = await db.get_coletas_historico(limit=limit)
+        return {"historico": historico, "total": len(historico)}
+    except Exception as e:
+        logger.error(f"Error fetching coletas historico: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ========================
 # FAVORITOS - ENDPOINTS
 # ========================
@@ -345,13 +358,22 @@ async def delete_canal(canal_id: int, permanent: bool = False):
 
 # Background tasks
 async def run_collection_job():
-    """Run the hybrid collection job"""
+    """Run the hybrid collection job - COM LOGGING"""
+    coleta_id = None
+    canais_sucesso = 0
+    canais_erro = 0
+    videos_total = 0
+    
     try:
         logger.info("Starting collection job...")
         
         # Get canais that need collection
         canais_to_collect = await db.get_canais_for_collection()
-        logger.info(f"Found {len(canais_to_collect)} canais to collect")
+        total_canais = len(canais_to_collect)
+        logger.info(f"Found {total_canais} canais to collect")
+        
+        # Criar log de coleta
+        coleta_id = await db.create_coleta_log(total_canais)
         
         for canal in canais_to_collect:
             try:
@@ -361,11 +383,16 @@ async def run_collection_job():
                 canal_data = await collector.get_canal_data(canal['url_canal'])
                 if canal_data:
                     await db.save_canal_data(canal['id'], canal_data)
+                    canais_sucesso += 1
+                else:
+                    canais_erro += 1
+                    logger.warning(f"No data collected for canal {canal['nome_canal']}")
                 
                 # Collect videos data
                 videos_data = await collector.get_videos_data(canal['url_canal'])
                 if videos_data:
                     await db.save_videos_data(canal['id'], videos_data)
+                    videos_total += len(videos_data)
                 
                 # Update last collection timestamp
                 await db.update_last_collection(canal['id'])
@@ -375,14 +402,46 @@ async def run_collection_job():
                 
             except Exception as e:
                 logger.error(f"Error collecting data for canal {canal['nome_canal']}: {e}")
+                canais_erro += 1
                 continue
         
         # Cleanup old data
         await db.cleanup_old_data()
         
-        logger.info("Collection job completed")
+        # Determinar status final
+        if canais_erro == 0:
+            status = "sucesso"
+        elif canais_sucesso > 0:
+            status = "parcial"
+        else:
+            status = "erro"
+        
+        # Atualizar log de coleta
+        if coleta_id:
+            await db.update_coleta_log(
+                coleta_id=coleta_id,
+                status=status,
+                canais_sucesso=canais_sucesso,
+                canais_erro=canais_erro,
+                videos_coletados=videos_total
+            )
+        
+        logger.info(f"Collection job completed: {canais_sucesso} success, {canais_erro} errors, {videos_total} videos")
+        
     except Exception as e:
         logger.error(f"Collection job failed: {e}")
+        
+        # Atualizar log com erro
+        if coleta_id:
+            await db.update_coleta_log(
+                coleta_id=coleta_id,
+                status="erro",
+                canais_sucesso=canais_sucesso,
+                canais_erro=canais_erro,
+                videos_coletados=videos_total,
+                mensagem_erro=str(e)
+            )
+        
         raise
 
 # Startup events

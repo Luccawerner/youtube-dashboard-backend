@@ -289,24 +289,35 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get videos with filters"""
+        """Get videos with filters - CORRIGIDO para remover duplicados"""
         try:
             days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
             days = days_map.get(periodo_publicacao, 60)
             cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
             
-            query = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date)
+            # CORREÇÃO: Buscar todos os vídeos do período
+            all_videos_response = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date).execute()
+            
+            # Filtrar para pegar apenas o registro mais recente de cada video_id
+            videos_dict = {}
+            for video in all_videos_response.data:
+                video_id = video["video_id"]
+                data_coleta = video.get("data_coleta", "")
+                
+                # Se não existe ainda, adiciona
+                if video_id not in videos_dict:
+                    videos_dict[video_id] = video
+                # Se já existe, mantém o com data_coleta mais recente
+                elif data_coleta > videos_dict[video_id].get("data_coleta", ""):
+                    videos_dict[video_id] = video
+            
+            # Converte de volta para lista
+            videos = list(videos_dict.values())
             
             if views_min:
-                query = query.gte("views_atuais", views_min)
+                videos = [v for v in videos if v.get("views_atuais", 0) >= views_min]
             
-            desc = order_by in ["views_atuais", "growth_video"]
-            query = query.order(order_by, desc=desc)
-            query = query.range(offset, offset + limit - 1)
-            
-            response = query.execute()
-            videos = response.data
-            
+            # Buscar informações dos canais
             if videos:
                 canal_ids = list(set(v["canal_id"] for v in videos))
                 canais_response = self.supabase.table("canais_monitorados").select("*").in_("id", canal_ids).execute()
@@ -319,6 +330,7 @@ class SupabaseClient:
                     video["subnicho"] = canal_info.get("subnicho", "Unknown")
                     video["lingua"] = canal_info.get("lingua", "N/A")
                 
+                # Aplicar filtros
                 if nicho:
                     videos = [v for v in videos if v.get("nicho") == nicho]
                 if subnicho:
@@ -331,6 +343,8 @@ class SupabaseClient:
             return videos
         except Exception as e:
             logger.error(f"Error fetching videos with filters: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
 
     async def get_filter_options(self) -> Dict[str, List]:

@@ -134,6 +134,74 @@ class SupabaseClient:
             logger.error(f"Error updating last collection: {e}")
             raise
 
+    # NOVAS FUNÇÕES PARA HISTÓRICO DE COLETAS
+    async def create_coleta_log(self, canais_total: int) -> int:
+        """Create a new collection log entry"""
+        try:
+            response = self.supabase.table("coletas_historico").insert({
+                "data_inicio": datetime.now().isoformat(),
+                "status": "em_progresso",
+                "canais_total": canais_total,
+                "canais_sucesso": 0,
+                "canais_erro": 0,
+                "videos_coletados": 0
+            }).execute()
+            
+            coleta_id = response.data[0]["id"]
+            logger.info(f"Created coleta log with id {coleta_id}")
+            return coleta_id
+        except Exception as e:
+            logger.error(f"Error creating coleta log: {e}")
+            raise
+
+    async def update_coleta_log(
+        self,
+        coleta_id: int,
+        status: str,
+        canais_sucesso: int,
+        canais_erro: int,
+        videos_coletados: int,
+        mensagem_erro: Optional[str] = None
+    ):
+        """Update collection log with results"""
+        try:
+            data_inicio_response = self.supabase.table("coletas_historico").select("data_inicio").eq("id", coleta_id).execute()
+            
+            if data_inicio_response.data:
+                data_inicio = datetime.fromisoformat(data_inicio_response.data[0]["data_inicio"])
+                data_fim = datetime.now()
+                duracao_segundos = int((data_fim - data_inicio).total_seconds())
+            else:
+                duracao_segundos = 0
+            
+            update_data = {
+                "data_fim": datetime.now().isoformat(),
+                "status": status,
+                "canais_sucesso": canais_sucesso,
+                "canais_erro": canais_erro,
+                "videos_coletados": videos_coletados,
+                "duracao_segundos": duracao_segundos
+            }
+            
+            if mensagem_erro:
+                update_data["mensagem_erro"] = mensagem_erro
+            
+            response = self.supabase.table("coletas_historico").update(update_data).eq("id", coleta_id).execute()
+            logger.info(f"Updated coleta log {coleta_id}: {status}")
+            return response.data
+        except Exception as e:
+            logger.error(f"Error updating coleta log: {e}")
+            raise
+
+    async def get_coletas_historico(self, limit: int = 20) -> List[Dict]:
+        """Get collection history"""
+        try:
+            response = self.supabase.table("coletas_historico").select("*").order("data_inicio", desc=True).limit(limit).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error fetching coletas historico: {e}")
+            raise
+
     async def get_canais_with_filters(
         self,
         nicho: Optional[str] = None,
@@ -179,10 +247,8 @@ class SupabaseClient:
                 
                 if canal_id not in historico_dict:
                     historico_dict[canal_id] = h
-                    logger.info(f"DEBUG: Adicionado histórico inicial para canal_id {canal_id}: views_30d={h.get('views_30d')}, views_7d={h.get('views_7d')}")
                 elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
                     historico_dict[canal_id] = h
-                    logger.info(f"DEBUG: Atualizado histórico para canal_id {canal_id}: views_30d={h.get('views_30d')}, views_7d={h.get('views_7d')}")
             
             logger.info(f"DEBUG: Dicionário de históricos criado com {len(historico_dict)} canais")
             
@@ -223,8 +289,6 @@ class SupabaseClient:
                     canal["engagement_rate"] = h.get("engagement_rate", 0.0)
                     canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
                     
-                    logger.info(f"DEBUG: Canal '{canal['nome_canal']}' (id={canal['id']}): views_30d={canal['views_30d']}, views_7d={canal['views_7d']}, inscritos={canal['inscritos']}")
-                    
                     # Calcular score
                     if canal["inscritos"] > 0:
                         score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + \
@@ -243,8 +307,6 @@ class SupabaseClient:
                         if views_anterior_7d > 0:
                             growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
                             canal["growth_7d"] = round(growth, 2)
-                else:
-                    logger.warning(f"DEBUG: Nenhum histórico encontrado para canal '{canal['nome_canal']}' (id={item['id']})")
                 
                 canais.append(canal)
             

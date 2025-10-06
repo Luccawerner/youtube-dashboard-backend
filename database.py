@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
 import logging
 from supabase import create_client, Client
@@ -56,7 +56,7 @@ class SupabaseClient:
 
     async def save_canal_data(self, canal_id: int, data: Dict[str, Any]):
         try:
-            data_coleta = datetime.now().date().isoformat()
+            data_coleta = datetime.now(timezone.utc).date().isoformat()
             
             views_60d = data.get("views_60d", 0)
             views_30d = data.get("views_30d", 0)
@@ -93,27 +93,44 @@ class SupabaseClient:
 
     async def save_videos_data(self, canal_id: int, videos: List[Dict[str, Any]]):
         try:
-            videos_data = []
-            current_date = datetime.now().date().isoformat()
+            if not videos:
+                return []
+                
+            current_date = datetime.now(timezone.utc).date().isoformat()
             
+            saved_videos = []
             for video in videos:
-                video_data = {
-                    "canal_id": canal_id,
-                    "video_id": video.get("video_id"),
-                    "titulo": video.get("titulo"),
-                    "url_video": video.get("url_video"),
-                    "data_publicacao": video.get("data_publicacao"),
-                    "data_coleta": current_date,
-                    "views_atuais": video.get("views_atuais"),
-                    "likes": video.get("likes"),
-                    "comentarios": video.get("comentarios"),
-                    "duracao": video.get("duracao")
-                }
-                videos_data.append(video_data)
+                try:
+                    video_data = {
+                        "canal_id": canal_id,
+                        "video_id": video.get("video_id"),
+                        "titulo": video.get("titulo"),
+                        "url_video": video.get("url_video"),
+                        "data_publicacao": video.get("data_publicacao"),
+                        "data_coleta": current_date,
+                        "views_atuais": video.get("views_atuais"),
+                        "likes": video.get("likes"),
+                        "comentarios": video.get("comentarios"),
+                        "duracao": video.get("duracao")
+                    }
+                    
+                    existing = self.supabase.table("videos_historico").select("id").eq("video_id", video_data["video_id"]).eq("data_coleta", current_date).execute()
+                    
+                    if existing.data:
+                        response = self.supabase.table("videos_historico").update(video_data).eq("video_id", video_data["video_id"]).eq("data_coleta", current_date).execute()
+                    else:
+                        response = self.supabase.table("videos_historico").insert(video_data).execute()
+                    
+                    if response.data:
+                        saved_videos.extend(response.data)
+                        
+                except Exception as video_error:
+                    logger.warning(f"Error saving individual video {video.get('video_id')}: {video_error}")
+                    continue
             
-            if videos_data:
-                response = self.supabase.table("videos_historico").upsert(videos_data).execute()
-                return response.data
+            logger.info(f"Saved {len(saved_videos)} videos for canal {canal_id}")
+            return saved_videos
+            
         except Exception as e:
             logger.error(f"Error saving videos data: {e}")
             raise
@@ -121,7 +138,7 @@ class SupabaseClient:
     async def update_last_collection(self, canal_id: int):
         try:
             response = self.supabase.table("canais_monitorados").update({
-                "ultima_coleta": datetime.now().isoformat()
+                "ultima_coleta": datetime.now(timezone.utc).isoformat()
             }).eq("id", canal_id).execute()
             return response.data
         except Exception as e:
@@ -131,12 +148,13 @@ class SupabaseClient:
     async def create_coleta_log(self, canais_total: int) -> int:
         try:
             response = self.supabase.table("coletas_historico").insert({
-                "data_inicio": datetime.now().isoformat(),
+                "data_inicio": datetime.now(timezone.utc).isoformat(),
                 "status": "em_progresso",
                 "canais_total": canais_total,
                 "canais_sucesso": 0,
                 "canais_erro": 0,
-                "videos_coletados": 0
+                "videos_coletados": 0,
+                "requisicoes_usadas": 0
             }).execute()
             
             coleta_id = response.data[0]["id"]
@@ -145,24 +163,27 @@ class SupabaseClient:
             logger.error(f"Error creating coleta log: {e}")
             raise
 
-    async def update_coleta_log(self, coleta_id: int, status: str, canais_sucesso: int, canais_erro: int, videos_coletados: int, mensagem_erro: Optional[str] = None):
+    async def update_coleta_log(self, coleta_id: int, status: str, canais_sucesso: int, canais_erro: int, videos_coletados: int, requisicoes_usadas: int = 0, mensagem_erro: Optional[str] = None):
         try:
             data_inicio_response = self.supabase.table("coletas_historico").select("data_inicio").eq("id", coleta_id).execute()
             
             if data_inicio_response.data:
-                data_inicio = datetime.fromisoformat(data_inicio_response.data[0]["data_inicio"])
-                data_fim = datetime.now()
+                data_inicio_str = data_inicio_response.data[0]["data_inicio"]
+                data_inicio = datetime.fromisoformat(data_inicio_str.replace('Z', '+00:00'))
+                data_fim = datetime.now(timezone.utc)
+                
                 duracao_segundos = int((data_fim - data_inicio).total_seconds())
             else:
                 duracao_segundos = 0
             
             update_data = {
-                "data_fim": datetime.now().isoformat(),
+                "data_fim": datetime.now(timezone.utc).isoformat(),
                 "status": status,
                 "canais_sucesso": canais_sucesso,
                 "canais_erro": canais_erro,
                 "videos_coletados": videos_coletados,
-                "duracao_segundos": duracao_segundos
+                "duracao_segundos": duracao_segundos,
+                "requisicoes_usadas": requisicoes_usadas
             }
             
             if mensagem_erro:
@@ -182,16 +203,29 @@ class SupabaseClient:
             logger.error(f"Error fetching coletas historico: {e}")
             raise
 
+    async def get_quota_diaria_usada(self) -> int:
+        """Get total requests used today across all collections"""
+        try:
+            hoje = datetime.now(timezone.utc).date().isoformat()
+            
+            response = self.supabase.table("coletas_historico").select("requisicoes_usadas").gte("data_inicio", hoje).execute()
+            
+            total = sum(coleta.get("requisicoes_usadas", 0) for coleta in response.data)
+            return total
+        except Exception as e:
+            logger.error(f"Error getting quota usage: {e}")
+            return 0
+
     async def cleanup_stuck_collections(self):
         try:
-            timeout_threshold = (datetime.now() - timedelta(minutes=30)).isoformat()
+            timeout_threshold = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
             stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
             
             if stuck_collections.data:
                 for coleta in stuck_collections.data:
                     self.supabase.table("coletas_historico").update({
                         "status": "erro",
-                        "data_fim": datetime.now().isoformat(),
+                        "data_fim": datetime.now(timezone.utc).isoformat(),
                         "mensagem_erro": "Coleta travada - timeout de 30 minutos excedido"
                     }).eq("id", coleta["id"]).execute()
             
@@ -314,7 +348,7 @@ class SupabaseClient:
         try:
             days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
             days = days_map.get(periodo_publicacao, 60)
-            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             
             all_videos_response = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date).execute()
             
@@ -408,7 +442,7 @@ class SupabaseClient:
 
     async def cleanup_old_data(self):
         try:
-            cutoff_date = (datetime.now() - timedelta(days=60)).date().isoformat()
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=60)).date().isoformat()
             
             canal_response = self.supabase.table("dados_canais_historico").delete().lt("data_coleta", cutoff_date).execute()
             video_response = self.supabase.table("videos_historico").delete().lt("data_coleta", cutoff_date).execute()

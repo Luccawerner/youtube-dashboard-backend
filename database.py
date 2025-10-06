@@ -242,7 +242,7 @@ class SupabaseClient:
             logger.error(f"Error deleting coleta: {e}")
             raise
 
-    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_60d_min: Optional[int] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 100, offset: int = 0) -> List[Dict]:
+    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_60d_min: Optional[int] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
         try:
             query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
             
@@ -344,7 +344,7 @@ class SupabaseClient:
             logger.error(traceback.format_exc())
             raise
 
-    async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "60d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 100, offset: int = 0) -> List[Dict]:
+    async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "60d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 500, offset: int = 0) -> List[Dict]:
         try:
             days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
             days = days_map.get(periodo_publicacao, 60)

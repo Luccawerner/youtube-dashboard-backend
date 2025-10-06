@@ -1,84 +1,500 @@
-async def run_collection_job():
-    coleta_id = None
-    canais_sucesso = 0
-    canais_erro = 0
-    videos_total = 0
-    
-    try:
-        logger.info("Starting collection job...")
+import os
+import asyncio
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any
+import logging
+from supabase import create_client, Client
+import json
+
+logger = logging.getLogger(__name__)
+
+class SupabaseClient:
+    def __init__(self):
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_KEY")
         
-        canais_to_collect = await db.get_canais_for_collection()
-        total_canais = len(canais_to_collect)
-        logger.info(f"Found {total_canais} canais to collect")
+        if not url or not key:
+            raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables are required")
         
-        coleta_id = await db.create_coleta_log(total_canais)
-        
-        for canal in canais_to_collect:
-            try:
-                logger.info(f"Collecting data for canal: {canal['nome_canal']}")
+        self.supabase: Client = create_client(url, key)
+        logger.info("Supabase client initialized")
+
+    async def test_connection(self):
+        try:
+            response = self.supabase.table("canais_monitorados").select("id").limit(1).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Database connection test failed: {e}")
+            raise
+
+    async def upsert_canal(self, canal_data: Dict[str, Any]) -> Dict:
+        try:
+            response = self.supabase.table("canais_monitorados").upsert({
+                "nome_canal": canal_data.get("nome_canal"),
+                "url_canal": canal_data.get("url_canal"),
+                "nicho": canal_data.get("nicho"),
+                "subnicho": canal_data.get("subnicho"),
+                "lingua": canal_data.get("lingua", "English"),
+                "tipo": canal_data.get("tipo", "minerado"),
+                "status": canal_data.get("status", "ativo")
+            }).execute()
+            
+            logger.info(f"Canal upserted: {canal_data.get('nome_canal')}")
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error upserting canal: {e}")
+            raise
+
+    async def get_canais_for_collection(self) -> List[Dict]:
+        try:
+            response = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo").execute()
+            logger.info(f"Found {len(response.data)} canais needing collection")
+            return response.data
+        except Exception as e:
+            logger.error(f"Error getting canais for collection: {e}")
+            raise
+
+    async def save_canal_data(self, canal_id: int, data: Dict[str, Any]):
+        try:
+            data_coleta = datetime.now().date().isoformat()
+            
+            views_60d = data.get("views_60d", 0)
+            views_30d = data.get("views_30d", 0)
+            views_15d = data.get("views_15d", 0)
+            views_7d = data.get("views_7d", 0)
+            
+            if views_60d == 0 and views_30d == 0 and views_15d == 0 and views_7d == 0:
+                logger.warning(f"Skipping save for canal_id {canal_id} - all views zero")
+                return None
+            
+            existing = self.supabase.table("dados_canais_historico").select("*").eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
+            
+            canal_data = {
+                "canal_id": canal_id,
+                "data_coleta": data_coleta,
+                "views_60d": data.get("views_60d"),
+                "views_30d": data.get("views_30d"),
+                "views_15d": data.get("views_15d"),
+                "views_7d": data.get("views_7d"),
+                "inscritos": data.get("inscritos"),
+                "videos_publicados_7d": data.get("videos_publicados_7d", 0),
+                "engagement_rate": data.get("engagement_rate", 0.0)
+            }
+            
+            if existing.data:
+                response = self.supabase.table("dados_canais_historico").update(canal_data).eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
+            else:
+                response = self.supabase.table("dados_canais_historico").insert(canal_data).execute()
+            
+            return response.data
+        except Exception as e:
+            logger.error(f"Error saving canal data: {e}")
+            raise
+
+    async def save_videos_data(self, canal_id: int, videos: List[Dict[str, Any]]):
+        try:
+            videos_data = []
+            current_date = datetime.now().date().isoformat()
+            
+            for video in videos:
+                video_data = {
+                    "canal_id": canal_id,
+                    "video_id": video.get("video_id"),
+                    "titulo": video.get("titulo"),
+                    "url_video": video.get("url_video"),
+                    "data_publicacao": video.get("data_publicacao"),
+                    "data_coleta": current_date,
+                    "views_atuais": video.get("views_atuais"),
+                    "likes": video.get("likes"),
+                    "comentarios": video.get("comentarios"),
+                    "duracao": video.get("duracao")
+                }
+                videos_data.append(video_data)
+            
+            if videos_data:
+                response = self.supabase.table("videos_historico").upsert(videos_data).execute()
+                return response.data
+        except Exception as e:
+            logger.error(f"Error saving videos data: {e}")
+            raise
+
+    async def update_last_collection(self, canal_id: int):
+        try:
+            response = self.supabase.table("canais_monitorados").update({
+                "ultima_coleta": datetime.now().isoformat()
+            }).eq("id", canal_id).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error updating last collection: {e}")
+            raise
+
+    async def create_coleta_log(self, canais_total: int) -> int:
+        try:
+            response = self.supabase.table("coletas_historico").insert({
+                "data_inicio": datetime.now().isoformat(),
+                "status": "em_progresso",
+                "canais_total": canais_total,
+                "canais_sucesso": 0,
+                "canais_erro": 0,
+                "videos_coletados": 0
+            }).execute()
+            
+            coleta_id = response.data[0]["id"]
+            return coleta_id
+        except Exception as e:
+            logger.error(f"Error creating coleta log: {e}")
+            raise
+
+    async def update_coleta_log(self, coleta_id: int, status: str, canais_sucesso: int, canais_erro: int, videos_coletados: int, mensagem_erro: Optional[str] = None):
+        try:
+            data_inicio_response = self.supabase.table("coletas_historico").select("data_inicio").eq("id", coleta_id).execute()
+            
+            if data_inicio_response.data:
+                data_inicio = datetime.fromisoformat(data_inicio_response.data[0]["data_inicio"])
+                data_fim = datetime.now()
+                duracao_segundos = int((data_fim - data_inicio).total_seconds())
+            else:
+                duracao_segundos = 0
+            
+            update_data = {
+                "data_fim": datetime.now().isoformat(),
+                "status": status,
+                "canais_sucesso": canais_sucesso,
+                "canais_erro": canais_erro,
+                "videos_coletados": videos_coletados,
+                "duracao_segundos": duracao_segundos
+            }
+            
+            if mensagem_erro:
+                update_data["mensagem_erro"] = mensagem_erro
+            
+            response = self.supabase.table("coletas_historico").update(update_data).eq("id", coleta_id).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error updating coleta log: {e}")
+            raise
+
+    async def get_coletas_historico(self, limit: int = 20) -> List[Dict]:
+        try:
+            response = self.supabase.table("coletas_historico").select("*").order("data_inicio", desc=True).limit(limit).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error fetching coletas historico: {e}")
+            raise
+
+    async def cleanup_stuck_collections(self):
+        try:
+            timeout_threshold = (datetime.now() - timedelta(minutes=30)).isoformat()
+            stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
+            
+            if stuck_collections.data:
+                for coleta in stuck_collections.data:
+                    self.supabase.table("coletas_historico").update({
+                        "status": "erro",
+                        "data_fim": datetime.now().isoformat(),
+                        "mensagem_erro": "Coleta travada - timeout de 30 minutos excedido"
+                    }).eq("id", coleta["id"]).execute()
+            
+            return len(stuck_collections.data) if stuck_collections.data else 0
+        except Exception as e:
+            logger.error(f"Error cleaning up stuck collections: {e}")
+            return 0
+
+    async def delete_coleta(self, coleta_id: int):
+        try:
+            response = self.supabase.table("coletas_historico").delete().eq("id", coleta_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting coleta: {e}")
+            raise
+
+    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_60d_min: Optional[int] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 100, offset: int = 0) -> List[Dict]:
+        try:
+            query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
+            
+            if nicho:
+                query = query.eq("nicho", nicho)
+            if subnicho:
+                query = query.eq("subnicho", subnicho)
+            if lingua:
+                query = query.eq("lingua", lingua)
+            if tipo:
+                query = query.eq("tipo", tipo)
+            
+            canais_response = query.execute()
+            historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
+            
+            historico_dict = {}
+            for h in historico_response.data:
+                canal_id = h["canal_id"]
+                data_coleta = h.get("data_coleta", "")
                 
-                canal_data = await collector.get_canal_data(canal['url_canal'])
-                if canal_data:
-                    saved = await db.save_canal_data(canal['id'], canal_data)
-                    if saved:
-                        canais_sucesso += 1
-                    else:
-                        canais_erro += 1
-                        logger.warning(f"Data not saved for {canal['nome_canal']} (likely all zeros)")
-                else:
-                    canais_erro += 1
-                    logger.warning(f"No data collected for canal {canal['nome_canal']}")
+                if canal_id not in historico_dict:
+                    historico_dict[canal_id] = h
+                elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                    historico_dict[canal_id] = h
+            
+            canais = []
+            for item in canais_response.data:
+                canal = {
+                    "id": item["id"],
+                    "nome_canal": item["nome_canal"],
+                    "url_canal": item["url_canal"],
+                    "nicho": item["nicho"],
+                    "subnicho": item["subnicho"],
+                    "lingua": item.get("lingua", "N/A"),
+                    "tipo": item.get("tipo", "minerado"),
+                    "status": item["status"],
+                    "ultima_coleta": item.get("ultima_coleta"),
+                    "views_60d": 0,
+                    "views_30d": 0,
+                    "views_15d": 0,
+                    "views_7d": 0,
+                    "inscritos": 0,
+                    "engagement_rate": 0.0,
+                    "videos_publicados_7d": 0,
+                    "score_calculado": 0,
+                    "growth_30d": 0,
+                    "growth_7d": 0
+                }
                 
-                videos_data = await collector.get_videos_data(canal['url_canal'])
-                if videos_data:
-                    await db.save_videos_data(canal['id'], videos_data)
-                    videos_total += len(videos_data)
+                if item["id"] in historico_dict:
+                    h = historico_dict[item["id"]]
+                    
+                    canal["views_60d"] = h.get("views_60d", 0)
+                    canal["views_30d"] = h.get("views_30d", 0)
+                    canal["views_15d"] = h.get("views_15d", 0)
+                    canal["views_7d"] = h.get("views_7d", 0)
+                    canal["inscritos"] = h.get("inscritos", 0)
+                    canal["engagement_rate"] = h.get("engagement_rate", 0.0)
+                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
+                    
+                    if canal["inscritos"] > 0:
+                        score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
+                        canal["score_calculado"] = round(score, 2)
+                    
+                    if canal["views_30d"] > 0 and canal["views_60d"] > 0:
+                        views_anterior_30d = canal["views_60d"] - canal["views_30d"]
+                        if views_anterior_30d > 0:
+                            growth = ((canal["views_30d"] - views_anterior_30d) / views_anterior_30d) * 100
+                            canal["growth_30d"] = round(growth, 2)
+                    
+                    if canal["views_7d"] > 0 and canal["views_15d"] > 0:
+                        views_anterior_7d = canal["views_15d"] - canal["views_7d"]
+                        if views_anterior_7d > 0:
+                            growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
+                            canal["growth_7d"] = round(growth, 2)
                 
-                await db.update_last_collection(canal['id'])
+                canais.append(canal)
+            
+            if views_60d_min:
+                canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
+            if views_30d_min:
+                canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
+            if views_15d_min:
+                canais = [c for c in canais if c.get("views_15d", 0) >= views_15d_min]
+            if views_7d_min:
+                canais = [c for c in canais if c.get("views_7d", 0) >= views_7d_min]
+            if score_min:
+                canais = [c for c in canais if c.get("score_calculado", 0) >= score_min]
+            if growth_min:
+                canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
+            
+            canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
+            
+            return canais[offset:offset + limit]
+            
+        except Exception as e:
+            logger.error(f"Error fetching canais with filters: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+    async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "60d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 100, offset: int = 0) -> List[Dict]:
+        try:
+            days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
+            days = days_map.get(periodo_publicacao, 60)
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            
+            all_videos_response = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date).execute()
+            
+            videos_dict = {}
+            for video in all_videos_response.data:
+                video_id = video["video_id"]
+                data_coleta = video.get("data_coleta", "")
                 
-                await asyncio.sleep(1)
+                if video_id not in videos_dict:
+                    videos_dict[video_id] = video
+                elif data_coleta > videos_dict[video_id].get("data_coleta", ""):
+                    videos_dict[video_id] = video
+            
+            videos = list(videos_dict.values())
+            
+            if views_min:
+                videos = [v for v in videos if v.get("views_atuais", 0) >= views_min]
+            
+            if videos:
+                canal_ids = list(set(v["canal_id"] for v in videos))
+                canais_response = self.supabase.table("canais_monitorados").select("*").in_("id", canal_ids).execute()
+                canais_dict = {c["id"]: c for c in canais_response.data}
                 
-            except Exception as e:
-                logger.error(f"Error collecting data for canal {canal['nome_canal']}: {e}")
-                canais_erro += 1
-                continue
-        
-        # Só faz cleanup se mais de 50% dos canais tiveram sucesso
-        if canais_sucesso >= (total_canais * 0.5):
-            await db.cleanup_old_data()
-            logger.info("Cleanup executed successfully")
-        else:
-            logger.warning(f"Skipping cleanup - only {canais_sucesso}/{total_canais} canais succeeded")
-        
-        if canais_erro == 0:
-            status = "sucesso"
-        elif canais_sucesso > 0:
-            status = "parcial"
-        else:
-            status = "erro"
-        
-        if coleta_id:
-            await db.update_coleta_log(
-                coleta_id=coleta_id,
-                status=status,
-                canais_sucesso=canais_sucesso,
-                canais_erro=canais_erro,
-                videos_coletados=videos_total
-            )
-        
-        logger.info(f"Collection job completed: {canais_sucesso} success, {canais_erro} errors, {videos_total} videos")
-        
-    except Exception as e:
-        logger.error(f"Collection job failed: {e}")
-        
-        if coleta_id:
-            await db.update_coleta_log(
-                coleta_id=coleta_id,
-                status="erro",
-                canais_sucesso=canais_sucesso,
-                canais_erro=canais_erro,
-                videos_coletados=videos_total,
-                mensagem_erro=str(e)
-            )
-        
-        raise
+                for video in videos:
+                    canal_info = canais_dict.get(video["canal_id"], {})
+                    video["nome_canal"] = canal_info.get("nome_canal", "Unknown")
+                    video["nicho"] = canal_info.get("nicho", "Unknown")
+                    video["subnicho"] = canal_info.get("subnicho", "Unknown")
+                    video["lingua"] = canal_info.get("lingua", "N/A")
+                
+                if nicho:
+                    videos = [v for v in videos if v.get("nicho") == nicho]
+                if subnicho:
+                    videos = [v for v in videos if v.get("subnicho") == subnicho]
+                if lingua:
+                    videos = [v for v in videos if v.get("lingua") == lingua]
+                if canal:
+                    videos = [v for v in videos if v.get("nome_canal") == canal]
+            
+            return videos
+        except Exception as e:
+            logger.error(f"Error fetching videos with filters: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+    async def get_filter_options(self) -> Dict[str, List]:
+        try:
+            nichos_response = self.supabase.table("canais_monitorados").select("nicho").execute()
+            nichos = list(set(item["nicho"] for item in nichos_response.data if item["nicho"]))
+            
+            subnichos_response = self.supabase.table("canais_monitorados").select("subnicho").execute()
+            subnichos = list(set(item["subnicho"] for item in subnichos_response.data if item["subnicho"]))
+            
+            linguas_response = self.supabase.table("canais_monitorados").select("lingua").execute()
+            linguas = list(set(item["lingua"] for item in linguas_response.data if item.get("lingua")))
+            
+            canais_response = self.supabase.table("canais_monitorados").select("nome_canal").eq("status", "ativo").execute()
+            canais = [item["nome_canal"] for item in canais_response.data]
+            
+            return {
+                "nichos": sorted(nichos),
+                "subnichos": sorted(subnichos),
+                "linguas": sorted(linguas),
+                "canais": sorted(canais)
+            }
+        except Exception as e:
+            logger.error(f"Error fetching filter options: {e}")
+            raise
+
+    async def get_system_stats(self) -> Dict[str, Any]:
+        try:
+            canais_response = self.supabase.table("canais_monitorados").select("id", count="exact").execute()
+            total_canais = canais_response.count
+            
+            videos_response = self.supabase.table("videos_historico").select("id", count="exact").execute()
+            total_videos = videos_response.count
+            
+            last_collection_response = self.supabase.table("canais_monitorados").select("ultima_coleta").order("ultima_coleta", desc=True).limit(1).execute()
+            last_collection = last_collection_response.data[0]["ultima_coleta"] if last_collection_response.data else None
+            
+            return {
+                "total_canais": total_canais,
+                "total_videos": total_videos,
+                "last_collection": last_collection,
+                "system_status": "healthy"
+            }
+        except Exception as e:
+            logger.error(f"Error fetching system stats: {e}")
+            raise
+
+    async def cleanup_old_data(self):
+        try:
+            cutoff_date = (datetime.now() - timedelta(days=60)).date().isoformat()
+            
+            canal_response = self.supabase.table("dados_canais_historico").delete().lt("data_coleta", cutoff_date).execute()
+            video_response = self.supabase.table("videos_historico").delete().lt("data_coleta", cutoff_date).execute()
+            
+            logger.info(f"Cleaned up old data before {cutoff_date}")
+        except Exception as e:
+            logger.error(f"Error cleaning up old data: {e}")
+            raise
+
+    async def add_favorito(self, tipo: str, item_id: int) -> Dict:
+        try:
+            existing = self.supabase.table("favoritos").select("*").eq("tipo", tipo).eq("item_id", item_id).execute()
+            
+            if existing.data:
+                return existing.data[0]
+            
+            response = self.supabase.table("favoritos").insert({
+                "tipo": tipo,
+                "item_id": item_id
+            }).execute()
+            
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error adding favorito: {e}")
+            raise
+
+    async def remove_favorito(self, tipo: str, item_id: int):
+        try:
+            response = self.supabase.table("favoritos").delete().eq("tipo", tipo).eq("item_id", item_id).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error removing favorito: {e}")
+            raise
+
+    async def get_favoritos_canais(self) -> List[Dict]:
+        try:
+            favoritos_response = self.supabase.table("favoritos").select("item_id").eq("tipo", "canal").execute()
+            
+            if not favoritos_response.data:
+                return []
+            
+            canal_ids = [fav["item_id"] for fav in favoritos_response.data]
+            canais = await self.get_canais_with_filters(limit=1000)
+            canais_favoritos = [c for c in canais if c["id"] in canal_ids]
+            
+            return canais_favoritos
+        except Exception as e:
+            logger.error(f"Error fetching favoritos canais: {e}")
+            raise
+
+    async def get_favoritos_videos(self) -> List[Dict]:
+        try:
+            favoritos_response = self.supabase.table("favoritos").select("item_id").eq("tipo", "video").execute()
+            
+            if not favoritos_response.data:
+                return []
+            
+            video_ids = [fav["item_id"] for fav in favoritos_response.data]
+            videos_response = self.supabase.table("videos_historico").select("*").in_("id", video_ids).execute()
+            videos = videos_response.data
+            
+            if videos:
+                canal_ids = list(set(v["canal_id"] for v in videos))
+                canais_response = self.supabase.table("canais_monitorados").select("*").in_("id", canal_ids).execute()
+                canais_dict = {c["id"]: c for c in canais_response.data}
+                
+                for video in videos:
+                    canal_info = canais_dict.get(video["canal_id"], {})
+                    video["nome_canal"] = canal_info.get("nome_canal", "Unknown")
+                    video["nicho"] = canal_info.get("nicho", "Unknown")
+                    video["subnicho"] = canal_info.get("subnicho", "Unknown")
+                    video["lingua"] = canal_info.get("lingua", "N/A")
+            
+            return videos
+        except Exception as e:
+            logger.error(f"Error fetching favoritos videos: {e}")
+            raise
+
+    async def delete_canal_permanently(self, canal_id: int):
+        try:
+            self.supabase.table("videos_historico").delete().eq("canal_id", canal_id).execute()
+            self.supabase.table("dados_canais_historico").delete().eq("canal_id", canal_id).execute()
+            self.supabase.table("favoritos").delete().eq("tipo", "canal").eq("item_id", canal_id).execute()
+            self.supabase.table("canais_monitorados").delete().eq("id", canal_id).execute()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting canal permanently: {e}")
+            raise

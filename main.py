@@ -11,13 +11,11 @@ import logging
 from database import SupabaseClient
 from collector import YouTubeCollector
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="YouTube Dashboard API", version="1.0.0")
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,7 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
 db = SupabaseClient()
 collector = YouTubeCollector()
 
@@ -36,9 +33,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     try:
-        # Test database connection
         await db.test_connection()
         return {
             "status": "healthy", 
@@ -66,9 +61,6 @@ async def get_canais(
     limit: Optional[int] = 100,
     offset: Optional[int] = 0
 ):
-    """
-    Get canais with filters for Funcionalidade 1
-    """
     try:
         canais = await db.get_canais_with_filters(
             nicho=nicho,
@@ -103,9 +95,6 @@ async def get_nossos_canais(
     limit: Optional[int] = 100,
     offset: Optional[int] = 0
 ):
-    """
-    Get APENAS nossos canais (tipo='nosso')
-    """
     try:
         canais = await db.get_canais_with_filters(
             nicho=nicho,
@@ -139,9 +128,6 @@ async def get_videos(
     limit: Optional[int] = 100,
     offset: Optional[int] = 0
 ):
-    """
-    Get videos with filters for Funcionalidade 2
-    """
     try:
         videos = await db.get_videos_with_filters(
             nicho=nicho,
@@ -162,9 +148,6 @@ async def get_videos(
 
 @app.get("/api/filtros")
 async def get_filtros():
-    """
-    Get available filter options (nichos, subnichos, canais)
-    """
     try:
         filtros = await db.get_filter_options()
         return filtros
@@ -182,9 +165,6 @@ async def add_canal_manual(
     tipo: str = "minerado",
     status: str = "ativo"
 ):
-    """
-    Add a canal manually
-    """
     try:
         canal_data = {
             'nome_canal': nome_canal,
@@ -204,9 +184,6 @@ async def add_canal_manual(
 
 @app.post("/api/collect-data")
 async def collect_data(background_tasks: BackgroundTasks):
-    """
-    Trigger data collection manually
-    """
     try:
         background_tasks.add_task(run_collection_job)
         return {"message": "Collection started", "status": "processing"}
@@ -216,9 +193,6 @@ async def collect_data(background_tasks: BackgroundTasks):
 
 @app.get("/api/stats")
 async def get_stats():
-    """
-    Get system statistics
-    """
     try:
         stats = await db.get_system_stats()
         return stats
@@ -228,9 +202,6 @@ async def get_stats():
 
 @app.post("/api/cleanup")
 async def cleanup_data():
-    """
-    Limpar dados com mais de 60 dias manualmente
-    """
     try:
         await db.cleanup_old_data()
         return {"message": "Cleanup concluído com sucesso", "status": "success"}
@@ -238,12 +209,8 @@ async def cleanup_data():
         logger.error(f"Error in cleanup: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# NOVO ENDPOINT: Histórico de Coletas
 @app.get("/api/coletas/historico")
 async def get_coletas_historico(limit: Optional[int] = 20):
-    """
-    Get collection history
-    """
     try:
         historico = await db.get_coletas_historico(limit=limit)
         return {"historico": historico, "total": len(historico)}
@@ -251,24 +218,32 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         logger.error(f"Error fetching coletas historico: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ========================
-# FAVORITOS - ENDPOINTS
-# ========================
+@app.post("/api/coletas/cleanup")
+async def cleanup_stuck_collections():
+    try:
+        count = await db.cleanup_stuck_collections()
+        return {"message": f"{count} coletas travadas marcadas como erro", "count": count}
+    except Exception as e:
+        logger.error(f"Error in cleanup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/coletas/{coleta_id}")
+async def delete_coleta(coleta_id: int):
+    try:
+        await db.delete_coleta(coleta_id)
+        return {"message": "Coleta deletada com sucesso"}
+    except Exception as e:
+        logger.error(f"Error deleting coleta: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/favoritos/adicionar")
 async def add_favorito(tipo: str, item_id: int):
-    """
-    Add item to favorites
-    tipo: 'canal' ou 'video'
-    item_id: ID do canal ou vídeo
-    """
     try:
         logger.info(f"Tentando adicionar favorito: tipo={tipo}, item_id={item_id}")
         
         if tipo not in ["canal", "video"]:
             raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
         
-        # Verificar se o item existe antes de adicionar
         if tipo == "canal":
             canal_exists = db.supabase.table("canais_monitorados").select("id").eq("id", item_id).execute()
             if not canal_exists.data:
@@ -292,11 +267,6 @@ async def add_favorito(tipo: str, item_id: int):
 
 @app.delete("/api/favoritos/remover")
 async def remove_favorito(tipo: str, item_id: int):
-    """
-    Remove item from favorites
-    tipo: 'canal' ou 'video'
-    item_id: ID do canal ou vídeo
-    """
     try:
         if tipo not in ["canal", "video"]:
             raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
@@ -309,9 +279,6 @@ async def remove_favorito(tipo: str, item_id: int):
 
 @app.get("/api/favoritos/canais")
 async def get_favoritos_canais():
-    """
-    Get all favorited channels
-    """
     try:
         canais = await db.get_favoritos_canais()
         return {"canais": canais, "total": len(canais)}
@@ -321,9 +288,6 @@ async def get_favoritos_canais():
 
 @app.get("/api/favoritos/videos")
 async def get_favoritos_videos():
-    """
-    Get all favorited videos
-    """
     try:
         videos = await db.get_favoritos_videos()
         return {"videos": videos, "total": len(videos)}
@@ -331,23 +295,13 @@ async def get_favoritos_videos():
         logger.error(f"Error fetching favoritos videos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ========================
-# DELETE CANAL - ENDPOINT
-# ========================
-
 @app.delete("/api/canais/{canal_id}")
 async def delete_canal(canal_id: int, permanent: bool = False):
-    """
-    Delete or deactivate a canal
-    permanent=False: marca como inativo
-    permanent=True: deleta permanentemente
-    """
     try:
         if permanent:
             await db.delete_canal_permanently(canal_id)
             return {"message": "Canal deletado permanentemente"}
         else:
-            # Just mark as inactive
             response = db.supabase.table("canais_monitorados").update({
                 "status": "inativo"
             }).eq("id", canal_id).execute()
@@ -356,9 +310,7 @@ async def delete_canal(canal_id: int, permanent: bool = False):
         logger.error(f"Error deleting canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Background tasks
 async def run_collection_job():
-    """Run the hybrid collection job - COM LOGGING"""
     coleta_id = None
     canais_sucesso = 0
     canais_erro = 0
@@ -367,19 +319,16 @@ async def run_collection_job():
     try:
         logger.info("Starting collection job...")
         
-        # Get canais that need collection
         canais_to_collect = await db.get_canais_for_collection()
         total_canais = len(canais_to_collect)
         logger.info(f"Found {total_canais} canais to collect")
         
-        # Criar log de coleta
         coleta_id = await db.create_coleta_log(total_canais)
         
         for canal in canais_to_collect:
             try:
                 logger.info(f"Collecting data for canal: {canal['nome_canal']}")
                 
-                # Collect canal data
                 canal_data = await collector.get_canal_data(canal['url_canal'])
                 if canal_data:
                     await db.save_canal_data(canal['id'], canal_data)
@@ -388,16 +337,13 @@ async def run_collection_job():
                     canais_erro += 1
                     logger.warning(f"No data collected for canal {canal['nome_canal']}")
                 
-                # Collect videos data
                 videos_data = await collector.get_videos_data(canal['url_canal'])
                 if videos_data:
                     await db.save_videos_data(canal['id'], videos_data)
                     videos_total += len(videos_data)
                 
-                # Update last collection timestamp
                 await db.update_last_collection(canal['id'])
                 
-                # Small delay to avoid rate limiting
                 await asyncio.sleep(1)
                 
             except Exception as e:
@@ -405,10 +351,8 @@ async def run_collection_job():
                 canais_erro += 1
                 continue
         
-        # Cleanup old data
         await db.cleanup_old_data()
         
-        # Determinar status final
         if canais_erro == 0:
             status = "sucesso"
         elif canais_sucesso > 0:
@@ -416,7 +360,6 @@ async def run_collection_job():
         else:
             status = "erro"
         
-        # Atualizar log de coleta
         if coleta_id:
             await db.update_coleta_log(
                 coleta_id=coleta_id,
@@ -431,7 +374,6 @@ async def run_collection_job():
     except Exception as e:
         logger.error(f"Collection job failed: {e}")
         
-        # Atualizar log com erro
         if coleta_id:
             await db.update_coleta_log(
                 coleta_id=coleta_id,
@@ -444,27 +386,21 @@ async def run_collection_job():
         
         raise
 
-# Startup events
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup"""
     logger.info("Starting YouTube Dashboard API...")
     
-    # Test connections
     try:
         await db.test_connection()
         logger.info("Database connection successful")
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
     
-    # Schedule daily collection job
     asyncio.create_task(schedule_daily_collection())
 
 async def schedule_daily_collection():
-    """Schedule daily collection job"""
     while True:
         try:
-            # Calculate time until next 6 AM
             now = datetime.now()
             next_run = now.replace(hour=6, minute=0, second=0, microsecond=0)
             if next_run <= now:
@@ -475,12 +411,10 @@ async def schedule_daily_collection():
             
             await asyncio.sleep(sleep_seconds)
             
-            # Run collection
             await run_collection_job()
             
         except Exception as e:
             logger.error(f"Scheduled collection failed: {e}")
-            # Sleep 1 hour before retrying
             await asyncio.sleep(3600)
 
 if __name__ == "__main__":

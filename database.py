@@ -63,7 +63,6 @@ class SupabaseClient:
         try:
             data_coleta = datetime.now().date().isoformat()
             
-            # Verificar se já existe registro para hoje
             existing = self.supabase.table("dados_canais_historico").select("*").eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
             
             canal_data = {
@@ -79,11 +78,9 @@ class SupabaseClient:
             }
             
             if existing.data:
-                # Se já existe, faz UPDATE
                 response = self.supabase.table("dados_canais_historico").update(canal_data).eq("canal_id", canal_id).eq("data_coleta", data_coleta).execute()
                 logger.info(f"Canal data UPDATED for canal_id {canal_id}")
             else:
-                # Se não existe, faz INSERT
                 response = self.supabase.table("dados_canais_historico").insert(canal_data).execute()
                 logger.info(f"Canal data INSERTED for canal_id {canal_id}")
             
@@ -134,7 +131,6 @@ class SupabaseClient:
             logger.error(f"Error updating last collection: {e}")
             raise
 
-    # NOVAS FUNÇÕES PARA HISTÓRICO DE COLETAS
     async def create_coleta_log(self, canais_total: int) -> int:
         """Create a new collection log entry"""
         try:
@@ -202,6 +198,38 @@ class SupabaseClient:
             logger.error(f"Error fetching coletas historico: {e}")
             raise
 
+    async def cleanup_stuck_collections(self):
+        """Mark collections stuck in 'em_progresso' for more than 30 min as 'erro'"""
+        try:
+            timeout_threshold = (datetime.now() - timedelta(minutes=30)).isoformat()
+            
+            stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
+            
+            if stuck_collections.data:
+                for coleta in stuck_collections.data:
+                    self.supabase.table("coletas_historico").update({
+                        "status": "erro",
+                        "data_fim": datetime.now().isoformat(),
+                        "mensagem_erro": "Coleta travada - timeout de 30 minutos excedido"
+                    }).eq("id", coleta["id"]).execute()
+                    
+                    logger.info(f"Marked stuck collection {coleta['id']} as erro")
+            
+            return len(stuck_collections.data) if stuck_collections.data else 0
+        except Exception as e:
+            logger.error(f"Error cleaning up stuck collections: {e}")
+            return 0
+
+    async def delete_coleta(self, coleta_id: int):
+        """Delete a collection from history"""
+        try:
+            response = self.supabase.table("coletas_historico").delete().eq("id", coleta_id).execute()
+            logger.info(f"Deleted coleta {coleta_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting coleta: {e}")
+            raise
+
     async def get_canais_with_filters(
         self,
         nicho: Optional[str] = None,
@@ -217,9 +245,8 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get canais with filters - VERSÃO CORRIGIDA"""
+        """Get canais with filters"""
         try:
-            # ETAPA 1: Buscar todos os canais ativos
             query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
             
             if nicho:
@@ -232,14 +259,8 @@ class SupabaseClient:
                 query = query.eq("tipo", tipo)
             
             canais_response = query.execute()
-            logger.info(f"DEBUG: Encontrados {len(canais_response.data)} canais ativos")
-            
-            # ETAPA 2: Buscar TODOS os dados históricos (CORRIGIDO - sem limite de dias)
             historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
             
-            logger.info(f"DEBUG: Encontrados {len(historico_response.data)} registros históricos")
-            
-            # ETAPA 3: Criar dicionário de históricos por canal_id
             historico_dict = {}
             for h in historico_response.data:
                 canal_id = h["canal_id"]
@@ -250,9 +271,6 @@ class SupabaseClient:
                 elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
                     historico_dict[canal_id] = h
             
-            logger.info(f"DEBUG: Dicionário de históricos criado com {len(historico_dict)} canais")
-            
-            # ETAPA 4: Combinar canais com seus históricos
             canais = []
             for item in canais_response.data:
                 canal = {
@@ -277,7 +295,6 @@ class SupabaseClient:
                     "growth_7d": 0
                 }
                 
-                # Se tem histórico, preenche com dados reais
                 if item["id"] in historico_dict:
                     h = historico_dict[item["id"]]
                     
@@ -289,13 +306,11 @@ class SupabaseClient:
                     canal["engagement_rate"] = h.get("engagement_rate", 0.0)
                     canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
                     
-                    # Calcular score
                     if canal["inscritos"] > 0:
                         score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + \
                                ((canal["views_7d"] / canal["inscritos"]) * 0.3)
                         canal["score_calculado"] = round(score, 2)
                     
-                    # Calcular growth
                     if canal["views_30d"] > 0 and canal["views_60d"] > 0:
                         views_anterior_30d = canal["views_60d"] - canal["views_30d"]
                         if views_anterior_30d > 0:
@@ -310,7 +325,6 @@ class SupabaseClient:
                 
                 canais.append(canal)
             
-            # Aplicar filtros
             if views_60d_min:
                 canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
             if views_30d_min:
@@ -324,12 +338,8 @@ class SupabaseClient:
             if growth_min:
                 canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
             
-            # Ordenar por score
             canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
             
-            logger.info(f"DEBUG: Retornando {len(canais)} canais após filtros")
-            
-            # Paginação
             return canais[offset:offset + limit]
             
         except Exception as e:
@@ -351,35 +361,29 @@ class SupabaseClient:
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict]:
-        """Get videos with filters - CORRIGIDO para remover duplicados"""
+        """Get videos with filters"""
         try:
             days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
             days = days_map.get(periodo_publicacao, 60)
             cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
             
-            # CORREÇÃO: Buscar todos os vídeos do período
             all_videos_response = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date).execute()
             
-            # Filtrar para pegar apenas o registro mais recente de cada video_id
             videos_dict = {}
             for video in all_videos_response.data:
                 video_id = video["video_id"]
                 data_coleta = video.get("data_coleta", "")
                 
-                # Se não existe ainda, adiciona
                 if video_id not in videos_dict:
                     videos_dict[video_id] = video
-                # Se já existe, mantém o com data_coleta mais recente
                 elif data_coleta > videos_dict[video_id].get("data_coleta", ""):
                     videos_dict[video_id] = video
             
-            # Converte de volta para lista
             videos = list(videos_dict.values())
             
             if views_min:
                 videos = [v for v in videos if v.get("views_atuais", 0) >= views_min]
             
-            # Buscar informações dos canais
             if videos:
                 canal_ids = list(set(v["canal_id"] for v in videos))
                 canais_response = self.supabase.table("canais_monitorados").select("*").in_("id", canal_ids).execute()
@@ -392,7 +396,6 @@ class SupabaseClient:
                     video["subnicho"] = canal_info.get("subnicho", "Unknown")
                     video["lingua"] = canal_info.get("lingua", "N/A")
                 
-                # Aplicar filtros
                 if nicho:
                     videos = [v for v in videos if v.get("nicho") == nicho]
                 if subnicho:

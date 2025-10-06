@@ -3,7 +3,7 @@ import re
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Set
 import aiohttp
 import json
 
@@ -20,16 +20,39 @@ class YouTubeCollector:
             os.environ.get("YOUTUBE_API_KEY_6")
         ]
         
-        # Remove None values
         self.api_keys = [key for key in self.api_keys if key]
         
         if not self.api_keys:
             raise ValueError("At least one YouTube API key is required")
         
         self.current_key_index = 0
+        self.exhausted_keys = set()
         self.base_url = "https://www.googleapis.com/youtube/v3"
-        self.max_retries = 3
+        self.max_retries = 1  # ONLY 1 retry per key
+        
+        # REQUEST COUNTER
+        self.total_requests = 0
+        self.requests_per_canal: Dict[str, int] = {}
+        self.failed_canals: Set[str] = set()
+        
         logger.info(f"YouTube collector initialized with {len(self.api_keys)} API keys")
+
+    def increment_request_counter(self, canal_name: str = "system"):
+        """Increment request counter"""
+        self.total_requests += 1
+        if canal_name not in self.requests_per_canal:
+            self.requests_per_canal[canal_name] = 0
+        self.requests_per_canal[canal_name] += 1
+        
+    def get_request_stats(self) -> Dict[str, Any]:
+        """Get request statistics"""
+        return {
+            "total_requests": self.total_requests,
+            "requests_per_canal": self.requests_per_canal.copy(),
+            "failed_canals": list(self.failed_canals),
+            "exhausted_keys": len(self.exhausted_keys),
+            "active_keys": len(self.api_keys) - len(self.exhausted_keys)
+        }
 
     def get_current_api_key(self) -> str:
         """Get current API key with rotation"""
@@ -37,8 +60,21 @@ class YouTubeCollector:
 
     def rotate_api_key(self):
         """Rotate to next API key"""
+        self.exhausted_keys.add(self.current_key_index)
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-        logger.info(f"Rotated to API key {self.current_key_index + 1}")
+        logger.warning(f"API key exhausted. Rotated to key {self.current_key_index + 1}")
+    
+    def all_keys_exhausted(self) -> bool:
+        """Check if all API keys are exhausted"""
+        return len(self.exhausted_keys) >= len(self.api_keys)
+
+    def mark_canal_as_failed(self, canal_url: str):
+        """Mark a canal as failed to avoid retrying with other keys"""
+        self.failed_canals.add(canal_url)
+
+    def is_canal_failed(self, canal_url: str) -> bool:
+        """Check if canal already failed"""
+        return canal_url in self.failed_canals
 
     def clean_youtube_url(self, url: str) -> str:
         """Remove extra paths from YouTube URL"""
@@ -46,225 +82,164 @@ class YouTubeCollector:
         return url
 
     def is_valid_channel_id(self, channel_id: str) -> bool:
-        """Check if a string is a valid YouTube channel ID (starts with UC and is 24 chars)"""
+        """Check if a string is a valid YouTube channel ID"""
         if not channel_id:
             return False
-        # YouTube channel IDs start with UC and are typically 24 characters
         return channel_id.startswith('UC') and len(channel_id) == 24
 
     def extract_channel_identifier(self, url: str) -> tuple[Optional[str], str]:
-        """
-        Extract channel identifier from YouTube URL
-        Returns: (identifier, type) where type is 'id', 'handle', 'username', or 'unknown'
-        
-        UPDATED: Now supports handles with dots, like @HER.VOICES
-        """
+        """Extract channel identifier from YouTube URL"""
         url = self.clean_youtube_url(url)
         
-        # Try to match channel ID (UC...)
         channel_id_match = re.search(r'youtube\.com/channel/([a-zA-Z0-9_-]+)', url)
         if channel_id_match:
             channel_id = channel_id_match.group(1)
             if self.is_valid_channel_id(channel_id):
-                logger.info(f"Found valid channel ID: {channel_id}")
                 return (channel_id, 'id')
         
-        # Try to match handle (@username) - UPDATED REGEX TO INCLUDE DOTS
-        # Changed from [a-zA-Z0-9_-]+ to [a-zA-Z0-9._-]+ to include dots
         handle_match = re.search(r'youtube\.com/@([a-zA-Z0-9._-]+)', url)
         if handle_match:
             handle = handle_match.group(1)
-            logger.info(f"Found handle: @{handle}")
             return (handle, 'handle')
         
-        # Try to match custom URL (/c/username) - ALSO UPDATED
         custom_match = re.search(r'youtube\.com/c/([a-zA-Z0-9._-]+)', url)
         if custom_match:
             username = custom_match.group(1)
-            logger.info(f"Found custom URL: {username}")
             return (username, 'username')
         
-        # Try to match user URL (/user/username) - ALSO UPDATED
         user_match = re.search(r'youtube\.com/user/([a-zA-Z0-9._-]+)', url)
         if user_match:
             username = user_match.group(1)
-            logger.info(f"Found user URL: {username}")
             return (username, 'username')
         
-        logger.warning(f"Could not extract identifier from URL: {url}")
         return (None, 'unknown')
 
-    async def get_channel_id_from_handle(self, handle: str) -> Optional[str]:
-        """Convert a handle (@username) to a proper channel ID (UC...)"""
-        retry_count = 0
-        
-        # Remove @ if present
+    async def get_channel_id_from_handle(self, handle: str, canal_name: str) -> Optional[str]:
+        """Convert handle to channel ID - ONLY 1 RETRY"""
+        if self.all_keys_exhausted():
+            return None
+            
         if handle.startswith('@'):
             handle = handle[1:]
         
-        logger.info(f"Attempting to convert handle '{handle}' to channel ID...")
-        
-        while retry_count < self.max_retries:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    # Try with forHandle parameter
-                    url = f"{self.base_url}/channels"
-                    params = {
-                        'part': 'id',
-                        'forHandle': handle,
-                        'key': self.get_current_api_key()
-                    }
-                    
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            if data.get('items') and len(data['items']) > 0:
-                                channel_id = data['items'][0]['id']
-                                logger.info(f"✅ Successfully converted handle '{handle}' to channel ID: {channel_id}")
-                                return channel_id
-                        elif response.status == 403:
-                            retry_count += 1
-                            if retry_count < self.max_retries:
-                                logger.warning(f"API key quota exceeded, rotating to next key...")
-                                self.rotate_api_key()
-                                await asyncio.sleep(1)
-                                continue
-                        
-                        # If forHandle didn't work, try forUsername
-                        logger.info(f"forHandle failed, trying forUsername for '{handle}'...")
-                        params = {
-                            'part': 'id',
-                            'forUsername': handle,
-                            'key': self.get_current_api_key()
-                        }
-                        
-                        async with session.get(url, params=params) as response2:
-                            if response2.status == 200:
-                                data = await response2.json()
-                                if data.get('items') and len(data['items']) > 0:
-                                    channel_id = data['items'][0]['id']
-                                    logger.info(f"✅ Successfully converted username '{handle}' to channel ID: {channel_id}")
-                                    return channel_id
-                            elif response2.status == 403:
-                                retry_count += 1
-                                if retry_count < self.max_retries:
-                                    logger.warning(f"API key quota exceeded, rotating to next key...")
-                                    self.rotate_api_key()
-                                    await asyncio.sleep(1)
-                                    continue
-                        
-                        logger.error(f"❌ Could not convert handle/username '{handle}' to channel ID (both methods failed)")
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/channels"
+                params = {
+                    'part': 'id',
+                    'forHandle': handle,
+                    'key': self.get_current_api_key()
+                }
+                
+                self.increment_request_counter(canal_name)
+                
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('items'):
+                            return data['items'][0]['id']
+                    elif response.status == 403:
+                        self.rotate_api_key()
                         return None
-            
-            except Exception as e:
-                logger.error(f"Error converting handle '{handle}' to channel ID: {e}")
-                retry_count += 1
-                if retry_count < self.max_retries:
-                    await asyncio.sleep(1)
-                else:
-                    return None
+                
+                # Try forUsername
+                params['forUsername'] = handle
+                del params['forHandle']
+                
+                self.increment_request_counter(canal_name)
+                
+                async with session.get(url, params=params) as response2:
+                    if response2.status == 200:
+                        data = await response2.json()
+                        if data.get('items'):
+                            return data['items'][0]['id']
+                    elif response2.status == 403:
+                        self.rotate_api_key()
+                
+                return None
         
-        return None
+        except Exception as e:
+            logger.error(f"Error converting handle: {e}")
+            return None
 
-    async def get_channel_id(self, url: str) -> Optional[str]:
-        """
-        Get a valid channel ID from any YouTube URL
-        This is the main function that handles all URL types
-        """
+    async def get_channel_id(self, url: str, canal_name: str) -> Optional[str]:
+        """Get channel ID from URL"""
         identifier, id_type = self.extract_channel_identifier(url)
         
         if not identifier:
-            logger.error(f"❌ Could not extract any identifier from URL: {url}")
             return None
         
-        # If it's already a valid ID, return it
         if id_type == 'id' and self.is_valid_channel_id(identifier):
-            logger.info(f"✅ Already have valid channel ID: {identifier}")
             return identifier
         
-        # If it's a handle or username, convert it to ID
         if id_type in ['handle', 'username']:
-            logger.info(f"🔄 Need to convert {id_type} '{identifier}' to channel ID...")
-            channel_id = await self.get_channel_id_from_handle(identifier)
-            if channel_id:
-                logger.info(f"✅ Conversion successful: {identifier} → {channel_id}")
-                return channel_id
-            else:
-                logger.error(f"❌ Failed to convert {id_type} '{identifier}' to channel ID")
-                return None
+            return await self.get_channel_id_from_handle(identifier, canal_name)
         
-        logger.error(f"❌ Unknown identifier type: {id_type}")
         return None
 
-    async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
-        """Get basic channel information with retry limit"""
+    async def get_channel_info(self, channel_id: str, canal_name: str) -> Optional[Dict[str, Any]]:
+        """Get channel info - ONLY 1 RETRY"""
         if not self.is_valid_channel_id(channel_id):
-            logger.error(f"❌ Invalid channel ID format: {channel_id}")
             return None
         
-        retry_count = 0
+        if self.all_keys_exhausted():
+            return None
         
-        while retry_count < self.max_retries:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/channels"
-                    params = {
-                        'part': 'statistics,snippet',
-                        'id': channel_id,
-                        'key': self.get_current_api_key()
-                    }
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/channels"
+                params = {
+                    'part': 'statistics,snippet',
+                    'id': channel_id,
+                    'key': self.get_current_api_key()
+                }
+                
+                self.increment_request_counter(canal_name)
+                
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('items'):
+                            channel = data['items'][0]
+                            stats = channel.get('statistics', {})
+                            snippet = channel.get('snippet', {})
+                            
+                            return {
+                                'channel_id': channel_id,
+                                'title': snippet.get('title'),
+                                'subscriber_count': int(stats.get('subscriberCount', 0)),
+                                'video_count': int(stats.get('videoCount', 0)),
+                                'view_count': int(stats.get('viewCount', 0))
+                            }
                     
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            if data.get('items'):
-                                channel = data['items'][0]
-                                stats = channel.get('statistics', {})
-                                snippet = channel.get('snippet', {})
-                                
-                                return {
-                                    'channel_id': channel_id,
-                                    'title': snippet.get('title'),
-                                    'subscriber_count': int(stats.get('subscriberCount', 0)),
-                                    'video_count': int(stats.get('videoCount', 0)),
-                                    'view_count': int(stats.get('viewCount', 0))
-                                }
-                            else:
-                                return None
-                        
-                        elif response.status == 403:
-                            retry_count += 1
-                            if retry_count < self.max_retries:
-                                self.rotate_api_key()
-                                await asyncio.sleep(1)
-                                continue
-                            else:
-                                logger.error(f"Max retries reached for channel {channel_id}")
-                                return None
-                        else:
-                            logger.error(f"Error getting channel info: {response.status}")
-                            return None
-            
-            except Exception as e:
-                logger.error(f"Error getting channel info for {channel_id}: {e}")
-                return None
+                    elif response.status == 403:
+                        self.rotate_api_key()
+                        return None
+                    
+                    return None
         
-        return None
+        except Exception as e:
+            logger.error(f"Error getting channel info: {e}")
+            return None
 
-    async def get_channel_videos(self, channel_id: str, days: int = 60) -> List[Dict[str, Any]]:
-        """Get videos from a channel within specified days with retry limit"""
+    async def get_channel_videos(self, channel_id: str, canal_name: str, days: int = 60) -> List[Dict[str, Any]]:
+        """Get channel videos - STOPS if key fails"""
         if not self.is_valid_channel_id(channel_id):
-            logger.error(f"❌ Invalid channel ID format for get_channel_videos: {channel_id}")
+            return []
+        
+        if self.all_keys_exhausted():
             return []
         
         try:
             videos = []
             page_token = None
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            retry_count = 0
             
             async with aiohttp.ClientSession() as session:
                 while True:
+                    if self.all_keys_exhausted():
+                        break
+                        
                     url = f"{self.base_url}/search"
                     params = {
                         'part': 'id,snippet',
@@ -279,7 +254,7 @@ class YouTubeCollector:
                     if page_token:
                         params['pageToken'] = page_token
                     
-                    logger.info(f"Fetching videos for channel {channel_id} since {cutoff_date.isoformat()}")
+                    self.increment_request_counter(canal_name)
                     
                     async with session.get(url, params=params) as response:
                         if response.status == 200:
@@ -289,7 +264,7 @@ class YouTubeCollector:
                                 break
                             
                             video_ids = [item['id']['videoId'] for item in data['items']]
-                            video_details = await self.get_video_details(video_ids)
+                            video_details = await self.get_video_details(video_ids, canal_name)
                             
                             for item, details in zip(data['items'], video_details):
                                 if details:
@@ -309,33 +284,26 @@ class YouTubeCollector:
                             if not page_token:
                                 break
                             
-                            retry_count = 0
                             await asyncio.sleep(0.1)
                         
                         elif response.status == 403:
-                            retry_count += 1
-                            if retry_count < self.max_retries:
-                                self.rotate_api_key()
-                                await asyncio.sleep(2)
-                                continue
-                            else:
-                                logger.error(f"Max retries reached for channel {channel_id}")
-                                break
+                            self.rotate_api_key()
+                            break
                         
                         else:
-                            error_text = await response.text()
-                            logger.error(f"Error getting videos (status {response.status}): {error_text}")
                             break
             
-            logger.info(f"Retrieved {len(videos)} videos for channel {channel_id}")
             return videos
         
         except Exception as e:
-            logger.error(f"Error getting videos for channel {channel_id}: {e}")
+            logger.error(f"Error getting videos: {e}")
             return []
 
-    async def get_video_details(self, video_ids: List[str]) -> List[Optional[Dict[str, Any]]]:
-        """Get detailed video statistics with retry limit"""
+    async def get_video_details(self, video_ids: List[str], canal_name: str) -> List[Optional[Dict[str, Any]]]:
+        """Get video details"""
+        if self.all_keys_exhausted():
+            return [None] * len(video_ids)
+            
         try:
             if not video_ids:
                 return []
@@ -343,49 +311,44 @@ class YouTubeCollector:
             details = []
             
             for i in range(0, len(video_ids), 50):
+                if self.all_keys_exhausted():
+                    details.extend([None] * (len(video_ids) - i))
+                    break
+                    
                 batch_ids = video_ids[i:i+50]
-                retry_count = 0
                 
-                while retry_count < self.max_retries:
-                    async with aiohttp.ClientSession() as session:
-                        url = f"{self.base_url}/videos"
-                        params = {
-                            'part': 'statistics,contentDetails',
-                            'id': ','.join(batch_ids),
-                            'key': self.get_current_api_key()
-                        }
-                        
-                        async with session.get(url, params=params) as response:
-                            if response.status == 200:
-                                data = await response.json()
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.base_url}/videos"
+                    params = {
+                        'part': 'statistics,contentDetails',
+                        'id': ','.join(batch_ids),
+                        'key': self.get_current_api_key()
+                    }
+                    
+                    self.increment_request_counter(canal_name)
+                    
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            
+                            for item in data.get('items', []):
+                                stats = item.get('statistics', {})
+                                content = item.get('contentDetails', {})
                                 
-                                for item in data.get('items', []):
-                                    stats = item.get('statistics', {})
-                                    content = item.get('contentDetails', {})
-                                    
-                                    video_detail = {
-                                        'view_count': int(stats.get('viewCount', 0)),
-                                        'like_count': int(stats.get('likeCount', 0)),
-                                        'comment_count': int(stats.get('commentCount', 0)),
-                                        'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
-                                    }
-                                    details.append(video_detail)
-                                break
-                            
-                            elif response.status == 403:
-                                retry_count += 1
-                                if retry_count < self.max_retries:
-                                    self.rotate_api_key()
-                                    await asyncio.sleep(1)
-                                    continue
-                                else:
-                                    logger.error(f"Max retries reached for video details")
-                                    details.extend([None] * len(batch_ids))
-                                    break
-                            
-                            else:
-                                details.extend([None] * len(batch_ids))
-                                break
+                                video_detail = {
+                                    'view_count': int(stats.get('viewCount', 0)),
+                                    'like_count': int(stats.get('likeCount', 0)),
+                                    'comment_count': int(stats.get('commentCount', 0)),
+                                    'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
+                                }
+                                details.append(video_detail)
+                        
+                        elif response.status == 403:
+                            self.rotate_api_key()
+                            details.extend([None] * len(batch_ids))
+                        
+                        else:
+                            details.extend([None] * len(batch_ids))
                 
                 await asyncio.sleep(0.1)
             
@@ -435,7 +398,6 @@ class YouTubeCollector:
                 if days_ago <= 7:
                     views_7d += video['views_atuais']
             except Exception as e:
-                logger.error(f"Error calculating views for video: {e}")
                 continue
         
         return {
@@ -445,38 +407,37 @@ class YouTubeCollector:
             'views_7d': views_7d
         }
 
-    async def get_canal_data(self, url_canal: str) -> Optional[Dict[str, Any]]:
+    async def get_canal_data(self, url_canal: str, canal_name: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
         try:
-            logger.info(f"🔍 Starting collection for URL: {url_canal}")
+            # Check if canal already failed
+            if self.is_canal_failed(url_canal):
+                logger.warning(f"Skipping {canal_name} - already failed")
+                return None
             
-            # Get proper channel ID from URL
-            channel_id = await self.get_channel_id(url_canal)
+            if self.all_keys_exhausted():
+                return None
+            
+            # Get channel ID
+            channel_id = await self.get_channel_id(url_canal, canal_name)
             
             if not channel_id:
-                logger.error(f"❌ Could not get channel ID from URL: {url_canal}")
+                self.mark_canal_as_failed(url_canal)
                 return None
             
-            logger.info(f"✅ Using channel ID: {channel_id}")
-            
-            channel_info = await self.get_channel_info(channel_id)
+            # Get channel info
+            channel_info = await self.get_channel_info(channel_id, canal_name)
             if not channel_info:
-                logger.error(f"❌ Could not get channel info for {channel_id}")
+                self.mark_canal_as_failed(url_canal)
                 return None
             
-            videos = await self.get_channel_videos(channel_id, days=60)
+            # Get videos
+            videos = await self.get_channel_videos(channel_id, canal_name, days=60)
             
             current_date = datetime.now(timezone.utc)
             views_by_period = self.calculate_views_by_period(videos, current_date)
             
-            videos_7d = 0
-            for v in videos:
-                try:
-                    pub_date = datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))
-                    if (current_date - pub_date).days <= 7:
-                        videos_7d += 1
-                except:
-                    continue
+            videos_7d = sum(1 for v in videos if (current_date - datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))).days <= 7)
             
             total_engagement = sum(v['likes'] + v['comentarios'] for v in videos)
             total_views = sum(v['views_atuais'] for v in videos)
@@ -489,30 +450,30 @@ class YouTubeCollector:
                 **views_by_period
             }
             
-            logger.info(f"✅ Successfully collected data for channel {channel_id}: {result}")
             return result
         
         except Exception as e:
-            logger.error(f"❌ Error getting canal data for {url_canal}: {e}")
+            logger.error(f"Error for {canal_name}: {e}")
+            self.mark_canal_as_failed(url_canal)
             return None
 
-    async def get_videos_data(self, url_canal: str) -> Optional[List[Dict[str, Any]]]:
+    async def get_videos_data(self, url_canal: str, canal_name: str) -> Optional[List[Dict[str, Any]]]:
         """Get videos data for a canal"""
         try:
-            logger.info(f"🔍 Getting videos for URL: {url_canal}")
-            
-            # Get proper channel ID from URL
-            channel_id = await self.get_channel_id(url_canal)
-            
-            if not channel_id:
-                logger.error(f"❌ Could not get channel ID from URL: {url_canal}")
+            if self.is_canal_failed(url_canal):
                 return None
             
-            logger.info(f"✅ Using channel ID: {channel_id}")
+            if self.all_keys_exhausted():
+                return None
             
-            videos = await self.get_channel_videos(channel_id, days=60)
+            channel_id = await self.get_channel_id(url_canal, canal_name)
+            
+            if not channel_id:
+                return None
+            
+            videos = await self.get_channel_videos(channel_id, canal_name, days=60)
             return videos
         
         except Exception as e:
-            logger.error(f"❌ Error getting videos data for {url_canal}: {e}")
+            logger.error(f"Error getting videos for {canal_name}: {e}")
             return None

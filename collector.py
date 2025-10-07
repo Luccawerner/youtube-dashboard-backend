@@ -37,6 +37,20 @@ class YouTubeCollector:
         
         logger.info(f"YouTube collector initialized with {len(self.api_keys)} API keys")
 
+    def reset_for_new_collection(self):
+        """Reset collector state before starting a new collection"""
+        self.exhausted_keys = set()
+        self.failed_canals = set()
+        self.total_requests = 0
+        self.requests_per_canal = {}
+        self.current_key_index = 0
+        logger.info("=" * 80)
+        logger.info("🔄 COLLECTOR RESET")
+        logger.info(f"✅ All {len(self.api_keys)} API keys refreshed")
+        logger.info("✅ Failed canals list cleared")
+        logger.info("✅ Request counters reset to zero")
+        logger.info("=" * 80)
+
     def increment_request_counter(self, canal_name: str = "system"):
         """Increment request counter"""
         self.total_requests += 1

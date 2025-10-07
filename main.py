@@ -374,6 +374,9 @@ async def run_collection_job():
         logger.info("🚀 STARTING COLLECTION JOB")
         logger.info("=" * 80)
         
+        # 🆕 RESET COLLECTOR STATE BEFORE STARTING
+        collector.reset_for_new_collection()
+        
         canais_to_collect = await db.get_canais_for_collection()
         total_canais = len(canais_to_collect)
         logger.info(f"📊 Found {total_canais} canais to collect")

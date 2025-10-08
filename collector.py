@@ -4,10 +4,73 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Set
+from collections import deque
 import aiohttp
 import json
 
 logger = logging.getLogger(__name__)
+
+class RateLimiter:
+    """
+    Rate Limiter para respeitar o limite de 100 req/100s do YouTube
+    Mantém histórico de requisições e calcula automaticamente quando pode fazer nova requisição
+    """
+    def __init__(self, max_requests: int = 90, time_window: int = 100):
+        """
+        max_requests: Máximo de requisições permitidas (90 para margem de segurança)
+        time_window: Janela de tempo em segundos (100s)
+        """
+        self.max_requests = max_requests
+        self.time_window = time_window
+        self.requests = deque()  # Armazena timestamps das requisições
+    
+    def _clean_old_requests(self):
+        """Remove requisições antigas (fora da janela de 100s)"""
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(seconds=self.time_window)
+        
+        while self.requests and self.requests[0] < cutoff:
+            self.requests.popleft()
+    
+    def can_make_request(self) -> bool:
+        """Verifica se pode fazer uma nova requisição"""
+        self._clean_old_requests()
+        return len(self.requests) < self.max_requests
+    
+    def get_wait_time(self) -> float:
+        """Calcula quanto tempo deve aguardar antes da próxima requisição"""
+        self._clean_old_requests()
+        
+        if len(self.requests) < self.max_requests:
+            return 0.0
+        
+        # Precisa aguardar até a requisição mais antiga sair da janela
+        oldest = self.requests[0]
+        now = datetime.now(timezone.utc)
+        wait = (oldest + timedelta(seconds=self.time_window)) - now
+        return max(0.0, wait.total_seconds())
+    
+    def record_request(self):
+        """Registra que uma requisição foi feita"""
+        self._clean_old_requests()
+        self.requests.append(datetime.now(timezone.utc))
+    
+    async def wait_if_needed(self):
+        """Aguarda automaticamente se necessário antes de fazer requisição"""
+        wait_time = self.get_wait_time()
+        if wait_time > 0:
+            logger.info(f"⏳ Rate limit próximo - aguardando {wait_time:.1f}s")
+            await asyncio.sleep(wait_time + 0.5)  # +0.5s margem extra
+    
+    def get_stats(self) -> Dict:
+        """Retorna estatísticas do rate limiter"""
+        self._clean_old_requests()
+        return {
+            "requests_in_window": len(self.requests),
+            "max_requests": self.max_requests,
+            "utilization_pct": (len(self.requests) / self.max_requests) * 100
+        }
+
 
 class YouTubeCollector:
     def __init__(self):
@@ -25,35 +88,45 @@ class YouTubeCollector:
         if not self.api_keys:
             raise ValueError("At least one YouTube API key is required")
         
+        # 🆕 Um RateLimiter para CADA chave
+        self.rate_limiters = {i: RateLimiter() for i in range(len(self.api_keys))}
+        
         self.current_key_index = 0
         self.exhausted_keys = set()
         self.base_url = "https://www.googleapis.com/youtube/v3"
-        self.max_retries = 1  # ONLY 1 retry per key
         
         # REQUEST COUNTER
         self.total_requests = 0
+        self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal: Dict[str, int] = {}
         self.failed_canals: Set[str] = set()
         
-        logger.info(f"YouTube collector initialized with {len(self.api_keys)} API keys")
+        # RETRY CONFIG
+        self.max_retries = 3
+        self.base_delay = 0.8  # Delay base entre requisições
+        
+        logger.info(f"🚀 YouTube collector initialized with {len(self.api_keys)} API keys")
+        logger.info(f"📊 Rate limiter: {self.rate_limiters[0].max_requests} req/{self.rate_limiters[0].time_window}s per key")
 
     def reset_for_new_collection(self):
-        """Reset collector state before starting a new collection"""
-        self.exhausted_keys = set()
+        """Reset collector state - MANTÉM exhausted_keys do dia"""
         self.failed_canals = set()
         self.total_requests = 0
+        self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal = {}
-        self.current_key_index = 0
+        # NÃO limpa exhausted_keys - mantém registro do dia
+        # NÃO reseta current_key_index - continua de onde parou
+        
         logger.info("=" * 80)
         logger.info("🔄 COLLECTOR RESET")
-        logger.info(f"✅ All {len(self.api_keys)} API keys refreshed")
-        logger.info("✅ Failed canals list cleared")
-        logger.info("✅ Request counters reset to zero")
+        logger.info(f"🔑 Chaves disponíveis: {len(self.api_keys) - len(self.exhausted_keys)}/{len(self.api_keys)}")
+        logger.info(f"📊 Chave atual: {self.current_key_index + 1}")
         logger.info("=" * 80)
 
     def increment_request_counter(self, canal_name: str = "system"):
         """Increment request counter"""
         self.total_requests += 1
+        self.requests_per_key[self.current_key_index] += 1
         if canal_name not in self.requests_per_canal:
             self.requests_per_canal[canal_name] = 0
         self.requests_per_canal[canal_name] += 1
@@ -62,68 +135,152 @@ class YouTubeCollector:
         """Get request statistics"""
         return {
             "total_requests": self.total_requests,
+            "requests_per_key": self.requests_per_key.copy(),
             "requests_per_canal": self.requests_per_canal.copy(),
             "failed_canals": list(self.failed_canals),
             "exhausted_keys": len(self.exhausted_keys),
             "active_keys": len(self.api_keys) - len(self.exhausted_keys)
         }
 
-    def get_current_api_key(self) -> str:
-        """Get current API key with rotation"""
+    def get_current_api_key(self) -> Optional[str]:
+        """Get current API key - PULA chaves esgotadas"""
+        if self.all_keys_exhausted():
+            return None
+        
+        # Pula chaves esgotadas
+        attempts = 0
+        while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            attempts += 1
+        
+        if attempts >= len(self.api_keys):
+            return None
+            
         return self.api_keys[self.current_key_index]
 
-    def rotate_api_key(self):
-        """Rotate to next API key"""
-        self.exhausted_keys.add(self.current_key_index)
+    def rotate_to_next_key(self):
+        """🆕 Rotaciona para próxima chave disponível (round-robin)"""
+        old_index = self.current_key_index
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-        logger.warning(f"⚠️ API key exhausted. Rotated to key {self.current_key_index + 1}")
+        
+        # Pula chaves esgotadas
+        attempts = 0
+        while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            attempts += 1
+        
+        if old_index != self.current_key_index:
+            stats = self.rate_limiters[self.current_key_index].get_stats()
+            logger.info(f"🔄 Rotated: Key {old_index + 1} → Key {self.current_key_index + 1} (load: {stats['requests_in_window']}/{stats['max_requests']})")
+
+    def mark_key_as_exhausted(self):
+        """Marca chave atual como esgotada"""
+        self.exhausted_keys.add(self.current_key_index)
+        logger.error(f"🚨 Key {self.current_key_index + 1} EXHAUSTED (quota esgotada)")
+        self.rotate_to_next_key()
     
     def all_keys_exhausted(self) -> bool:
         """Check if all API keys are exhausted"""
         return len(self.exhausted_keys) >= len(self.api_keys)
 
     def mark_canal_as_failed(self, canal_url: str):
-        """Mark a canal as failed to avoid retrying with other keys"""
+        """Mark a canal as failed"""
         self.failed_canals.add(canal_url)
 
     def is_canal_failed(self, canal_url: str) -> bool:
         """Check if canal already failed"""
         return canal_url in self.failed_canals
-    
-    def is_quota_error(self, error_data: dict) -> bool:
+
+    async def make_api_request(self, url: str, params: dict, canal_name: str = "system", retry_count: int = 0) -> Optional[dict]:
         """
-        🆕 NOVA FUNÇÃO: Verifica se o erro 403 é REALMENTE de quota esgotada
+        🆕 FUNÇÃO CENTRAL para todas requisições da API
+        Gerencia rate limiting, retries, e diferenciação de erros
+        """
+        if self.all_keys_exhausted():
+            logger.error("❌ All keys exhausted!")
+            return None
         
-        Retorna True apenas se for erro de quota real
-        Retorna False se for outro tipo de erro 403 (canal privado, deletado, etc)
-        """
+        current_key = self.get_current_api_key()
+        if not current_key:
+            return None
+        
+        params['key'] = current_key
+        
+        # 🆕 AGUARDA RATE LIMITER
+        await self.rate_limiters[self.current_key_index].wait_if_needed()
+        
         try:
-            error_obj = error_data.get('error', {})
-            message = error_obj.get('message', '').lower()
-            
-            # Lista de palavras-chave que indicam quota esgotada
-            quota_keywords = [
-                'quota',
-                'quotaexceeded',
-                'dailylimitexceeded',
-                'usageratelimitexceeded',
-                'ratelimitexceeded'
-            ]
-            
-            # Verifica se alguma palavra-chave está na mensagem
-            is_quota = any(keyword in message for keyword in quota_keywords)
-            
-            if is_quota:
-                logger.error(f"🚨 REAL QUOTA ERROR: {message}")
-            else:
-                logger.warning(f"⚠️ 403 error but NOT quota: {message}")
-            
-            return is_quota
+            async with aiohttp.ClientSession() as session:
+                # Incrementa contadores ANTES da requisição
+                self.increment_request_counter(canal_name)
+                self.rate_limiters[self.current_key_index].record_request()
+                
+                # Delay adaptativo base
+                if self.total_requests > 0:
+                    await asyncio.sleep(self.base_delay)
+                
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    
+                    # ✅ SUCESSO
+                    if response.status == 200:
+                        data = await response.json()
+                        return data
+                    
+                    # ⚠️ ERRO 403 - Diferencia rate limit de quota
+                    elif response.status == 403:
+                        error_data = await response.json()
+                        error_obj = error_data.get('error', {})
+                        error_msg = error_obj.get('message', '').lower()
+                        error_reason = ''
+                        if error_obj.get('errors'):
+                            error_reason = error_obj['errors'][0].get('reason', '')
+                        
+                        # 🔴 RATE LIMIT EXCEEDED
+                        if 'ratelimit' in error_msg or 'ratelimit' in error_reason.lower():
+                            logger.warning(f"⏱️ RATE LIMIT hit on key {self.current_key_index + 1}")
+                            
+                            if retry_count < self.max_retries:
+                                wait_time = (2 ** retry_count) * 30  # 30s, 60s, 120s
+                                logger.info(f"♻️ Retry {retry_count + 1}/{self.max_retries} após {wait_time}s")
+                                await asyncio.sleep(wait_time)
+                                # Tenta de novo com MESMA chave
+                                return await self.make_api_request(url, params, canal_name, retry_count + 1)
+                            else:
+                                logger.error(f"❌ Max retries atingido - pulando requisição")
+                                return None
+                        
+                        # 🔴 QUOTA EXCEEDED (quota diária esgotada)
+                        elif 'quota' in error_msg or 'quota' in error_reason.lower() or 'dailylimit' in error_reason.lower():
+                            logger.error(f"🚨 QUOTA EXCEEDED on key {self.current_key_index + 1}: {error_msg}")
+                            self.mark_key_as_exhausted()
+                            
+                            # Tenta com PRÓXIMA chave se ainda tem tentativas
+                            if retry_count < self.max_retries and not self.all_keys_exhausted():
+                                logger.info(f"♻️ Tentando com próxima chave disponível...")
+                                return await self.make_api_request(url, params, canal_name, retry_count + 1)
+                            else:
+                                return None
+                        
+                        # 🔴 OUTRO ERRO 403 (canal privado, deletado, etc)
+                        else:
+                            logger.warning(f"⚠️ 403 error (não quota/rate): {error_msg}")
+                            return None
+                    
+                    # ⚠️ OUTROS ERROS HTTP
+                    else:
+                        logger.warning(f"⚠️ HTTP {response.status}: {await response.text()}")
+                        return None
+                        
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Timeout na requisição")
+            if retry_count < self.max_retries:
+                await asyncio.sleep(5)
+                return await self.make_api_request(url, params, canal_name, retry_count + 1)
+            return None
             
         except Exception as e:
-            logger.error(f"Error checking quota error: {e}")
-            # Em caso de dúvida, assume que NÃO é quota (mais seguro)
-            return False
+            logger.error(f"❌ Exception na requisição: {e}")
+            return None
 
     def clean_youtube_url(self, url: str) -> str:
         """Remove extra paths from YouTube URL"""
@@ -164,56 +321,28 @@ class YouTubeCollector:
         return (None, 'unknown')
 
     async def get_channel_id_from_handle(self, handle: str, canal_name: str) -> Optional[str]:
-        """Convert handle to channel ID - ONLY 1 RETRY"""
+        """Convert handle to channel ID"""
         if self.all_keys_exhausted():
             return None
             
         if handle.startswith('@'):
             handle = handle[1:]
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/channels"
-                params = {
-                    'part': 'id',
-                    'forHandle': handle,
-                    'key': self.get_current_api_key()
-                }
-                
-                self.increment_request_counter(canal_name)
-                
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('items'):
-                            return data['items'][0]['id']
-                    elif response.status == 403:
-                        error_data = await response.json()
-                        if self.is_quota_error(error_data):
-                            self.rotate_api_key()
-                        return None
-                
-                # Try forUsername
-                params['forUsername'] = handle
-                del params['forHandle']
-                
-                self.increment_request_counter(canal_name)
-                
-                async with session.get(url, params=params) as response2:
-                    if response2.status == 200:
-                        data = await response2.json()
-                        if data.get('items'):
-                            return data['items'][0]['id']
-                    elif response2.status == 403:
-                        error_data = await response2.json()
-                        if self.is_quota_error(error_data):
-                            self.rotate_api_key()
-                
-                return None
+        # Try forHandle
+        url = f"{self.base_url}/channels"
+        params = {'part': 'id', 'forHandle': handle}
         
-        except Exception as e:
-            logger.error(f"Error converting handle: {e}")
-            return None
+        data = await self.make_api_request(url, params, canal_name)
+        if data and data.get('items'):
+            return data['items'][0]['id']
+        
+        # Try forUsername
+        params = {'part': 'id', 'forUsername': handle}
+        data = await self.make_api_request(url, params, canal_name)
+        if data and data.get('items'):
+            return data['items'][0]['id']
+        
+        return None
 
     async def get_channel_id(self, url: str, canal_name: str) -> Optional[str]:
         """Get channel ID from URL"""
@@ -231,204 +360,132 @@ class YouTubeCollector:
         return None
 
     async def get_channel_info(self, channel_id: str, canal_name: str) -> Optional[Dict[str, Any]]:
-        """Get channel info - ONLY 1 RETRY - 🆕 CORRIGIDO"""
+        """Get channel info"""
         if not self.is_valid_channel_id(channel_id):
             return None
         
-        if self.all_keys_exhausted():
-            return None
+        url = f"{self.base_url}/channels"
+        params = {'part': 'statistics,snippet', 'id': channel_id}
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/channels"
-                params = {
-                    'part': 'statistics,snippet',
-                    'id': channel_id,
-                    'key': self.get_current_api_key()
-                }
-                
-                self.increment_request_counter(canal_name)
-                
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('items'):
-                            channel = data['items'][0]
-                            stats = channel.get('statistics', {})
-                            snippet = channel.get('snippet', {})
-                            
-                            return {
-                                'channel_id': channel_id,
-                                'title': snippet.get('title'),
-                                'subscriber_count': int(stats.get('subscriberCount', 0)),
-                                'video_count': int(stats.get('videoCount', 0)),
-                                'view_count': int(stats.get('viewCount', 0))
-                            }
-                    
-                    elif response.status == 403:
-                        error_data = await response.json()
-                        # 🆕 VERIFICAÇÃO INTELIGENTE
-                        if self.is_quota_error(error_data):
-                            self.rotate_api_key()
-                        else:
-                            # Não é erro de quota, apenas problema com este canal
-                            logger.warning(f"❌ Canal {canal_name} retornou 403 mas NÃO é quota - pulando")
-                        return None
-                    
-                    return None
+        data = await self.make_api_request(url, params, canal_name)
         
-        except Exception as e:
-            logger.error(f"Error getting channel info: {e}")
-            return None
+        if data and data.get('items'):
+            channel = data['items'][0]
+            stats = channel.get('statistics', {})
+            snippet = channel.get('snippet', {})
+            
+            return {
+                'channel_id': channel_id,
+                'title': snippet.get('title'),
+                'subscriber_count': int(stats.get('subscriberCount', 0)),
+                'video_count': int(stats.get('videoCount', 0)),
+                'view_count': int(stats.get('viewCount', 0))
+            }
+        
+        return None
 
     async def get_channel_videos(self, channel_id: str, canal_name: str, days: int = 60) -> List[Dict[str, Any]]:
-        """Get channel videos - 🆕 CORRIGIDO"""
+        """Get channel videos"""
         if not self.is_valid_channel_id(channel_id):
             return []
         
         if self.all_keys_exhausted():
             return []
         
-        try:
-            videos = []
-            page_token = None
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            
-            async with aiohttp.ClientSession() as session:
-                while True:
-                    if self.all_keys_exhausted():
-                        break
-                        
-                    url = f"{self.base_url}/search"
-                    params = {
-                        'part': 'id,snippet',
-                        'channelId': channel_id,
-                        'type': 'video',
-                        'order': 'date',
-                        'maxResults': 50,
-                        'publishedAfter': cutoff_date.isoformat(),
-                        'key': self.get_current_api_key()
-                    }
-                    
-                    if page_token:
-                        params['pageToken'] = page_token
-                    
-                    self.increment_request_counter(canal_name)
-                    
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            if not data.get('items'):
-                                break
-                            
-                            video_ids = [item['id']['videoId'] for item in data['items']]
-                            video_details = await self.get_video_details(video_ids, canal_name)
-                            
-                            for item, details in zip(data['items'], video_details):
-                                if details:
-                                    video_info = {
-                                        'video_id': item['id']['videoId'],
-                                        'titulo': item['snippet']['title'],
-                                        'url_video': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
-                                        'data_publicacao': item['snippet']['publishedAt'],
-                                        'views_atuais': details.get('view_count', 0),
-                                        'likes': details.get('like_count', 0),
-                                        'comentarios': details.get('comment_count', 0),
-                                        'duracao': details.get('duration_seconds', 0)
-                                    }
-                                    videos.append(video_info)
-                            
-                            page_token = data.get('nextPageToken')
-                            if not page_token:
-                                break
-                            
-                            await asyncio.sleep(0.1)
-                        
-                        elif response.status == 403:
-                            error_data = await response.json()
-                            # 🆕 VERIFICAÇÃO INTELIGENTE
-                            if self.is_quota_error(error_data):
-                                self.rotate_api_key()
-                            else:
-                                logger.warning(f"❌ Canal {canal_name} - vídeos retornaram 403 mas NÃO é quota")
-                            break
-                        
-                        else:
-                            break
-            
-            return videos
+        videos = []
+        page_token = None
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         
-        except Exception as e:
-            logger.error(f"Error getting videos: {e}")
-            return []
+        while True:
+            if self.all_keys_exhausted():
+                break
+            
+            url = f"{self.base_url}/search"
+            params = {
+                'part': 'id,snippet',
+                'channelId': channel_id,
+                'type': 'video',
+                'order': 'date',
+                'maxResults': 50,
+                'publishedAfter': cutoff_date.isoformat()
+            }
+            
+            if page_token:
+                params['pageToken'] = page_token
+            
+            data = await self.make_api_request(url, params, canal_name)
+            
+            if not data or not data.get('items'):
+                break
+            
+            video_ids = [item['id']['videoId'] for item in data['items']]
+            video_details = await self.get_video_details(video_ids, canal_name)
+            
+            for item, details in zip(data['items'], video_details):
+                if details:
+                    video_info = {
+                        'video_id': item['id']['videoId'],
+                        'titulo': item['snippet']['title'],
+                        'url_video': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
+                        'data_publicacao': item['snippet']['publishedAt'],
+                        'views_atuais': details.get('view_count', 0),
+                        'likes': details.get('like_count', 0),
+                        'comentarios': details.get('comment_count', 0),
+                        'duracao': details.get('duration_seconds', 0)
+                    }
+                    videos.append(video_info)
+            
+            page_token = data.get('nextPageToken')
+            if not page_token:
+                break
+        
+        return videos
 
     async def get_video_details(self, video_ids: List[str], canal_name: str) -> List[Optional[Dict[str, Any]]]:
-        """Get video details - 🆕 CORRIGIDO"""
+        """Get video details"""
         if self.all_keys_exhausted():
             return [None] * len(video_ids)
             
-        try:
-            if not video_ids:
-                return []
-            
-            details = []
-            
-            for i in range(0, len(video_ids), 50):
-                if self.all_keys_exhausted():
-                    details.extend([None] * (len(video_ids) - i))
-                    break
-                    
-                batch_ids = video_ids[i:i+50]
-                
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/videos"
-                    params = {
-                        'part': 'statistics,contentDetails',
-                        'id': ','.join(batch_ids),
-                        'key': self.get_current_api_key()
-                    }
-                    
-                    self.increment_request_counter(canal_name)
-                    
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            for item in data.get('items', []):
-                                stats = item.get('statistics', {})
-                                content = item.get('contentDetails', {})
-                                
-                                video_detail = {
-                                    'view_count': int(stats.get('viewCount', 0)),
-                                    'like_count': int(stats.get('likeCount', 0)),
-                                    'comment_count': int(stats.get('commentCount', 0)),
-                                    'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
-                                }
-                                details.append(video_detail)
-                        
-                        elif response.status == 403:
-                            error_data = await response.json()
-                            # 🆕 VERIFICAÇÃO INTELIGENTE
-                            if self.is_quota_error(error_data):
-                                self.rotate_api_key()
-                            details.extend([None] * len(batch_ids))
-                        
-                        else:
-                            details.extend([None] * len(batch_ids))
-                
-                await asyncio.sleep(0.1)
-            
-            return details
+        if not video_ids:
+            return []
         
-        except Exception as e:
-            logger.error(f"Error getting video details: {e}")
-            return [None] * len(video_ids)
+        details = []
+        
+        for i in range(0, len(video_ids), 50):
+            if self.all_keys_exhausted():
+                details.extend([None] * (len(video_ids) - i))
+                break
+                
+            batch_ids = video_ids[i:i+50]
+            
+            url = f"{self.base_url}/videos"
+            params = {
+                'part': 'statistics,contentDetails',
+                'id': ','.join(batch_ids)
+            }
+            
+            data = await self.make_api_request(url, params, canal_name)
+            
+            if data and data.get('items'):
+                for item in data['items']:
+                    stats = item.get('statistics', {})
+                    content = item.get('contentDetails', {})
+                    
+                    video_detail = {
+                        'view_count': int(stats.get('viewCount', 0)),
+                        'like_count': int(stats.get('likeCount', 0)),
+                        'comment_count': int(stats.get('commentCount', 0)),
+                        'duration_seconds': self.parse_duration(content.get('duration', 'PT0S'))
+                    }
+                    details.append(video_detail)
+            else:
+                details.extend([None] * len(batch_ids))
+        
+        return details
 
     def parse_duration(self, duration_str: str) -> int:
         """Parse YouTube duration format to seconds"""
         try:
-            import re
             pattern = r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?'
             match = re.match(pattern, duration_str)
             
@@ -477,28 +534,27 @@ class YouTubeCollector:
     async def get_canal_data(self, url_canal: str, canal_name: str) -> Optional[Dict[str, Any]]:
         """Get complete canal data"""
         try:
-            # Check if canal already failed
             if self.is_canal_failed(url_canal):
-                logger.warning(f"Skipping {canal_name} - already failed")
+                logger.warning(f"⏭️ Skipping {canal_name} - already failed")
                 return None
             
             if self.all_keys_exhausted():
                 return None
             
-            # Get channel ID
+            # 🆕 Rotaciona para próxima chave antes de começar (round-robin)
+            self.rotate_to_next_key()
+            
             channel_id = await self.get_channel_id(url_canal, canal_name)
             
             if not channel_id:
                 self.mark_canal_as_failed(url_canal)
                 return None
             
-            # Get channel info
             channel_info = await self.get_channel_info(channel_id, canal_name)
             if not channel_info:
                 self.mark_canal_as_failed(url_canal)
                 return None
             
-            # Get videos
             videos = await self.get_channel_videos(channel_id, canal_name, days=60)
             
             current_date = datetime.now(timezone.utc)
@@ -520,7 +576,7 @@ class YouTubeCollector:
             return result
         
         except Exception as e:
-            logger.error(f"Error for {canal_name}: {e}")
+            logger.error(f"❌ Error for {canal_name}: {e}")
             self.mark_canal_as_failed(url_canal)
             return None
 
@@ -542,5 +598,5 @@ class YouTubeCollector:
             return videos
         
         except Exception as e:
-            logger.error(f"Error getting videos for {canal_name}: {e}")
+            logger.error(f"❌ Error getting videos for {canal_name}: {e}")
             return None

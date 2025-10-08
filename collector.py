@@ -76,7 +76,7 @@ class YouTubeCollector:
         """Rotate to next API key"""
         self.exhausted_keys.add(self.current_key_index)
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-        logger.warning(f"API key exhausted. Rotated to key {self.current_key_index + 1}")
+        logger.warning(f"⚠️ API key exhausted. Rotated to key {self.current_key_index + 1}")
     
     def all_keys_exhausted(self) -> bool:
         """Check if all API keys are exhausted"""
@@ -89,6 +89,41 @@ class YouTubeCollector:
     def is_canal_failed(self, canal_url: str) -> bool:
         """Check if canal already failed"""
         return canal_url in self.failed_canals
+    
+    def is_quota_error(self, error_data: dict) -> bool:
+        """
+        🆕 NOVA FUNÇÃO: Verifica se o erro 403 é REALMENTE de quota esgotada
+        
+        Retorna True apenas se for erro de quota real
+        Retorna False se for outro tipo de erro 403 (canal privado, deletado, etc)
+        """
+        try:
+            error_obj = error_data.get('error', {})
+            message = error_obj.get('message', '').lower()
+            
+            # Lista de palavras-chave que indicam quota esgotada
+            quota_keywords = [
+                'quota',
+                'quotaexceeded',
+                'dailylimitexceeded',
+                'usageratelimitexceeded',
+                'ratelimitexceeded'
+            ]
+            
+            # Verifica se alguma palavra-chave está na mensagem
+            is_quota = any(keyword in message for keyword in quota_keywords)
+            
+            if is_quota:
+                logger.error(f"🚨 REAL QUOTA ERROR: {message}")
+            else:
+                logger.warning(f"⚠️ 403 error but NOT quota: {message}")
+            
+            return is_quota
+            
+        except Exception as e:
+            logger.error(f"Error checking quota error: {e}")
+            # Em caso de dúvida, assume que NÃO é quota (mais seguro)
+            return False
 
     def clean_youtube_url(self, url: str) -> str:
         """Remove extra paths from YouTube URL"""
@@ -153,7 +188,9 @@ class YouTubeCollector:
                         if data.get('items'):
                             return data['items'][0]['id']
                     elif response.status == 403:
-                        self.rotate_api_key()
+                        error_data = await response.json()
+                        if self.is_quota_error(error_data):
+                            self.rotate_api_key()
                         return None
                 
                 # Try forUsername
@@ -168,7 +205,9 @@ class YouTubeCollector:
                         if data.get('items'):
                             return data['items'][0]['id']
                     elif response2.status == 403:
-                        self.rotate_api_key()
+                        error_data = await response2.json()
+                        if self.is_quota_error(error_data):
+                            self.rotate_api_key()
                 
                 return None
         
@@ -192,7 +231,7 @@ class YouTubeCollector:
         return None
 
     async def get_channel_info(self, channel_id: str, canal_name: str) -> Optional[Dict[str, Any]]:
-        """Get channel info - ONLY 1 RETRY"""
+        """Get channel info - ONLY 1 RETRY - 🆕 CORRIGIDO"""
         if not self.is_valid_channel_id(channel_id):
             return None
         
@@ -227,7 +266,13 @@ class YouTubeCollector:
                             }
                     
                     elif response.status == 403:
-                        self.rotate_api_key()
+                        error_data = await response.json()
+                        # 🆕 VERIFICAÇÃO INTELIGENTE
+                        if self.is_quota_error(error_data):
+                            self.rotate_api_key()
+                        else:
+                            # Não é erro de quota, apenas problema com este canal
+                            logger.warning(f"❌ Canal {canal_name} retornou 403 mas NÃO é quota - pulando")
                         return None
                     
                     return None
@@ -237,7 +282,7 @@ class YouTubeCollector:
             return None
 
     async def get_channel_videos(self, channel_id: str, canal_name: str, days: int = 60) -> List[Dict[str, Any]]:
-        """Get channel videos - STOPS if key fails"""
+        """Get channel videos - 🆕 CORRIGIDO"""
         if not self.is_valid_channel_id(channel_id):
             return []
         
@@ -301,7 +346,12 @@ class YouTubeCollector:
                             await asyncio.sleep(0.1)
                         
                         elif response.status == 403:
-                            self.rotate_api_key()
+                            error_data = await response.json()
+                            # 🆕 VERIFICAÇÃO INTELIGENTE
+                            if self.is_quota_error(error_data):
+                                self.rotate_api_key()
+                            else:
+                                logger.warning(f"❌ Canal {canal_name} - vídeos retornaram 403 mas NÃO é quota")
                             break
                         
                         else:
@@ -314,7 +364,7 @@ class YouTubeCollector:
             return []
 
     async def get_video_details(self, video_ids: List[str], canal_name: str) -> List[Optional[Dict[str, Any]]]:
-        """Get video details"""
+        """Get video details - 🆕 CORRIGIDO"""
         if self.all_keys_exhausted():
             return [None] * len(video_ids)
             
@@ -358,7 +408,10 @@ class YouTubeCollector:
                                 details.append(video_detail)
                         
                         elif response.status == 403:
-                            self.rotate_api_key()
+                            error_data = await response.json()
+                            # 🆕 VERIFICAÇÃO INTELIGENTE
+                            if self.is_quota_error(error_data):
+                                self.rotate_api_key()
                             details.extend([None] * len(batch_ids))
                         
                         else:

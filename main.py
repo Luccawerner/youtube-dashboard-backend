@@ -202,14 +202,12 @@ async def update_canal(
     tipo: str = "minerado",
     status: str = "ativo"
 ):
-    """Update existing canal - NEW ENDPOINT"""
+    """Update existing canal"""
     try:
-        # Verifica se canal existe
         canal_exists = db.supabase.table("canais_monitorados").select("id").eq("id", canal_id).execute()
         if not canal_exists.data:
             raise HTTPException(status_code=404, detail="Canal não encontrado")
         
-        # Atualiza o canal
         response = db.supabase.table("canais_monitorados").update({
             "nome_canal": nome_canal,
             "url_canal": url_canal,
@@ -235,7 +233,6 @@ async def can_start_collection() -> tuple[bool, str]:
     if collection_in_progress:
         return False, "Collection already in progress"
     
-    # Only 5 minute cooldown to prevent accidental double-clicks
     if last_collection_time:
         time_since_last = datetime.now(timezone.utc) - last_collection_time
         cooldown = timedelta(minutes=5)
@@ -290,7 +287,6 @@ async def get_coletas_historico(limit: Optional[int] = 20):
     try:
         historico = await db.get_coletas_historico(limit=limit)
         
-        # Calculate quota info
         quota_usada_hoje = await db.get_quota_diaria_usada()
         quota_total = 60000
         quota_disponivel = quota_total - quota_usada_hoje
@@ -396,6 +392,234 @@ async def delete_canal(canal_id: int, permanent: bool = False):
         logger.error(f"Error deleting canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ========================================
+# 🔔 NOVOS ENDPOINTS - NOTIFICAÇÕES
+# ========================================
+
+@app.get("/api/notificacoes")
+async def get_notificacoes_nao_vistas():
+    """Retorna apenas notificações não vistas"""
+    try:
+        notificacoes = await db.get_notificacoes_nao_vistas()
+        return {
+            "notificacoes": notificacoes,
+            "total": len(notificacoes)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching notificacoes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/notificacoes/todas")
+async def get_notificacoes_todas(
+    limit: Optional[int] = 50,
+    offset: Optional[int] = 0,
+    vista: Optional[bool] = None
+):
+    """Retorna todas as notificações com filtros opcionais"""
+    try:
+        notificacoes = await db.get_notificacoes_all(
+            limit=limit,
+            offset=offset,
+            vista_filter=vista
+        )
+        return {
+            "notificacoes": notificacoes,
+            "total": len(notificacoes)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching all notificacoes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/notificacoes/historico")
+async def get_notificacoes_historico(limit: Optional[int] = 100):
+    """Retorna histórico completo de notificações"""
+    try:
+        notificacoes = await db.get_notificacoes_all(limit=limit, offset=0)
+        return {
+            "historico": notificacoes,
+            "total": len(notificacoes)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching historico: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/notificacoes/{notif_id}/marcar-vista")
+async def marcar_notificacao_vista(notif_id: int):
+    """Marca uma notificação específica como vista"""
+    try:
+        success = await db.marcar_notificacao_vista(notif_id)
+        
+        if success:
+            return {
+                "message": "Notificação marcada como vista",
+                "notif_id": notif_id
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Notificação não encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking notificacao as vista: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/notificacoes/marcar-todas")
+async def marcar_todas_notificacoes_vistas():
+    """Marca todas as notificações não vistas como vistas"""
+    try:
+        count = await db.marcar_todas_notificacoes_vistas()
+        return {
+            "message": f"{count} notificações marcadas como vistas",
+            "count": count
+        }
+    except Exception as e:
+        logger.error(f"Error marking all notificacoes as vistas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/notificacoes/stats")
+async def get_notificacoes_stats():
+    """Retorna estatísticas das notificações"""
+    try:
+        stats = await db.get_notificacao_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error fetching notificacao stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
+# 📋 NOVOS ENDPOINTS - REGRAS
+# ========================================
+
+@app.get("/api/regras-notificacoes")
+async def get_regras_notificacoes():
+    """Retorna todas as regras de notificações"""
+    try:
+        regras = await db.get_regras_notificacoes()
+        return {
+            "regras": regras,
+            "total": len(regras)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching regras: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/regras-notificacoes")
+async def create_regra_notificacao(
+    nome_regra: str,
+    views_minimas: int,
+    periodo_dias: int,
+    tipo_canal: str = "ambos",
+    ativa: bool = True
+):
+    """Cria uma nova regra de notificação"""
+    try:
+        regra_data = {
+            "nome_regra": nome_regra,
+            "views_minimas": views_minimas,
+            "periodo_dias": periodo_dias,
+            "tipo_canal": tipo_canal,
+            "ativa": ativa
+        }
+        
+        result = await db.create_regra_notificacao(regra_data)
+        
+        if result:
+            return {
+                "message": "Regra criada com sucesso",
+                "regra": result
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Erro ao criar regra")
+    except Exception as e:
+        logger.error(f"Error creating regra: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/regras-notificacoes/{regra_id}")
+async def update_regra_notificacao(
+    regra_id: int,
+    nome_regra: str,
+    views_minimas: int,
+    periodo_dias: int,
+    tipo_canal: str = "ambos",
+    ativa: bool = True
+):
+    """Atualiza uma regra existente"""
+    try:
+        regra_data = {
+            "nome_regra": nome_regra,
+            "views_minimas": views_minimas,
+            "periodo_dias": periodo_dias,
+            "tipo_canal": tipo_canal,
+            "ativa": ativa
+        }
+        
+        result = await db.update_regra_notificacao(regra_id, regra_data)
+        
+        if result:
+            return {
+                "message": "Regra atualizada com sucesso",
+                "regra": result
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Regra não encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating regra: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/regras-notificacoes/{regra_id}")
+async def delete_regra_notificacao(regra_id: int):
+    """Deleta uma regra"""
+    try:
+        success = await db.delete_regra_notificacao(regra_id)
+        
+        if success:
+            return {"message": "Regra deletada com sucesso"}
+        else:
+            raise HTTPException(status_code=404, detail="Regra não encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting regra: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/regras-notificacoes/{regra_id}/toggle")
+async def toggle_regra_notificacao(regra_id: int):
+    """Ativa/desativa uma regra (toggle)"""
+    try:
+        result = await db.toggle_regra_notificacao(regra_id)
+        
+        if result:
+            status = "ativada" if result["ativa"] else "desativada"
+            return {
+                "message": f"Regra {status} com sucesso",
+                "regra": result
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Regra não encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling regra: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
+# FIM DOS NOVOS ENDPOINTS
+# ========================================
+
+
 async def run_collection_job():
     """Main collection job with intelligent quota management"""
     global collection_in_progress, last_collection_time
@@ -411,7 +635,6 @@ async def run_collection_job():
         logger.info("🚀 STARTING COLLECTION JOB")
         logger.info("=" * 80)
         
-        # 🆕 RESET COLLECTOR STATE BEFORE STARTING
         collector.reset_for_new_collection()
         
         canais_to_collect = await db.get_canais_for_collection()
@@ -422,7 +645,6 @@ async def run_collection_job():
         logger.info(f"📝 Created coleta log ID: {coleta_id}")
         
         for index, canal in enumerate(canais_to_collect, 1):
-            # Check if all API keys exhausted
             if collector.all_keys_exhausted():
                 logger.error("=" * 80)
                 logger.error("❌ ALL API KEYS EXHAUSTED - STOPPING COLLECTION")
@@ -434,7 +656,6 @@ async def run_collection_job():
             try:
                 logger.info(f"[{index}/{total_canais}] 🔄 Processing: {canal['nome_canal']}")
                 
-                # Collect canal data
                 canal_data = await collector.get_canal_data(canal['url_canal'], canal['nome_canal'])
                 if canal_data:
                     saved = await db.save_canal_data(canal['id'], canal_data)
@@ -448,16 +669,13 @@ async def run_collection_job():
                     canais_erro += 1
                     logger.warning(f"❌ [{index}/{total_canais}] Failed: {canal['nome_canal']}")
                 
-                # Collect videos data
                 videos_data = await collector.get_videos_data(canal['url_canal'], canal['nome_canal'])
                 if videos_data:
                     await db.save_videos_data(canal['id'], videos_data)
                     videos_total += len(videos_data)
                 
-                # Update last collection timestamp
                 await db.update_last_collection(canal['id'])
                 
-                # Small delay
                 await asyncio.sleep(1)
                 
             except Exception as e:
@@ -465,7 +683,6 @@ async def run_collection_job():
                 canais_erro += 1
                 continue
         
-        # Get request statistics
         stats = collector.get_request_stats()
         total_requests = stats['total_requests']
         
@@ -478,14 +695,12 @@ async def run_collection_job():
         logger.info(f"🔑 Active keys: {stats['active_keys']}/{len(collector.api_keys)}")
         logger.info("=" * 80)
         
-        # Only cleanup if more than 50% success
         if canais_sucesso >= (total_canais * 0.5):
             logger.info("🧹 Cleanup threshold met (>50% success)")
             await db.cleanup_old_data()
         else:
-            logger.warning(f"⏭️ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
+            logger.warning(f"⭐ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
         
-        # Determine final status
         if canais_erro == 0:
             status = "sucesso"
         elif canais_sucesso > 0:
@@ -493,7 +708,6 @@ async def run_collection_job():
         else:
             status = "erro"
         
-        # Update collection log with request count
         if coleta_id:
             await db.update_coleta_log(
                 coleta_id=coleta_id,
@@ -543,13 +757,11 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Database failed: {e}")
     
-    # Cleanup stuck collections
     try:
         await db.cleanup_stuck_collections()
     except Exception as e:
         logger.error(f"Error cleaning stuck collections: {e}")
     
-    # NEVER trigger collection on startup - only schedule
     logger.info("📅 Scheduling daily collection (NO startup collection)")
     asyncio.create_task(schedule_daily_collection())
     logger.info("=" * 80)
@@ -560,7 +772,6 @@ async def schedule_daily_collection():
         try:
             now = datetime.now(timezone.utc)
             
-            # Target: 10:00 UTC = 7:00 AM BRT
             next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
             
             if next_run <= now:
@@ -575,7 +786,6 @@ async def schedule_daily_collection():
             
             await asyncio.sleep(sleep_seconds)
             
-            # Check if we can start
             can_collect, message = await can_start_collection()
             
             if can_collect:

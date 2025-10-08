@@ -168,7 +168,7 @@ async def get_filtros():
 async def add_canal_manual(
     nome_canal: str,
     url_canal: str,
-    nicho: str = "",  # ← MUDANÇA AQUI: AGORA É OPCIONAL
+    nicho: str = "",
     subnicho: str = "",
     lingua: str = "English",
     tipo: str = "minerado",
@@ -189,6 +189,43 @@ async def add_canal_manual(
         return {"message": "Canal added successfully", "canal": result}
     except Exception as e:
         logger.error(f"Error adding canal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/canais/{canal_id}")
+async def update_canal(
+    canal_id: int,
+    nome_canal: str,
+    url_canal: str,
+    nicho: str = "",
+    subnicho: str = "",
+    lingua: str = "English",
+    tipo: str = "minerado",
+    status: str = "ativo"
+):
+    """Update existing canal - NEW ENDPOINT"""
+    try:
+        # Verifica se canal existe
+        canal_exists = db.supabase.table("canais_monitorados").select("id").eq("id", canal_id).execute()
+        if not canal_exists.data:
+            raise HTTPException(status_code=404, detail="Canal não encontrado")
+        
+        # Atualiza o canal
+        response = db.supabase.table("canais_monitorados").update({
+            "nome_canal": nome_canal,
+            "url_canal": url_canal,
+            "nicho": nicho,
+            "subnicho": subnicho,
+            "lingua": lingua,
+            "tipo": tipo,
+            "status": status
+        }).eq("id", canal_id).execute()
+        
+        logger.info(f"Canal updated: {nome_canal} (ID: {canal_id})")
+        return {"message": "Canal atualizado com sucesso", "canal": response.data[0] if response.data else None}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def can_start_collection() -> tuple[bool, str]:

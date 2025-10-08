@@ -168,7 +168,7 @@ async def get_filtros():
 async def add_canal_manual(
     nome_canal: str,
     url_canal: str,
-    nicho: str,
+    nicho: str = "",  # ← MUDANÇA AQUI: AGORA É OPCIONAL
     subnicho: str = "",
     lingua: str = "English",
     tipo: str = "minerado",
@@ -436,7 +436,7 @@ async def run_collection_job():
         logger.info(f"📊 COLLECTION STATISTICS")
         logger.info(f"✅ Success: {canais_sucesso}/{total_canais}")
         logger.info(f"❌ Errors: {canais_erro}/{total_canais}")
-        logger.info(f"📹 Videos: {videos_total}")
+        logger.info(f"🎬 Videos: {videos_total}")
         logger.info(f"📡 Total API Requests: {total_requests}")
         logger.info(f"🔑 Active keys: {stats['active_keys']}/{len(collector.api_keys)}")
         logger.info("=" * 80)
@@ -446,7 +446,7 @@ async def run_collection_job():
             logger.info("🧹 Cleanup threshold met (>50% success)")
             await db.cleanup_old_data()
         else:
-            logger.warning(f"⏭️  Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
+            logger.warning(f"⏭️ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
         
         # Determine final status
         if canais_erro == 0:

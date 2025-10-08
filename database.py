@@ -32,7 +32,7 @@ class SupabaseClient:
             response = self.supabase.table("canais_monitorados").upsert({
                 "nome_canal": canal_data.get("nome_canal"),
                 "url_canal": canal_data.get("url_canal"),
-                "nicho": canal_data.get("nicho"),
+                "nicho": canal_data.get("nicho", ""),  # ← MUDANÇA AQUI: ACEITA VAZIO
                 "subnicho": canal_data.get("subnicho"),
                 "lingua": canal_data.get("lingua", "English"),
                 "tipo": canal_data.get("tipo", "minerado"),

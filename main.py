@@ -10,7 +10,7 @@ import logging
 
 from database import SupabaseClient
 from collector import YouTubeCollector
-from notifier import NotificationChecker  # ✅ ADICIONADO - Import do notifier
+from notifier import NotificationChecker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ app.add_middleware(
 
 db = SupabaseClient()
 collector = YouTubeCollector()
-notifier = NotificationChecker(db.supabase)  # ✅ ADICIONADO - Inicialização do notifier
+notifier = NotificationChecker(db.supabase)
 
 # Global flags
 collection_in_progress = False
@@ -381,11 +381,25 @@ async def get_favoritos_videos():
 
 @app.delete("/api/canais/{canal_id}")
 async def delete_canal(canal_id: int, permanent: bool = False):
+    """
+    Delete canal - desativa ou deleta permanentemente
+    Se permanent=True, deleta notificações primeiro para evitar violação de foreign key
+    """
     try:
         if permanent:
+            # 🆕 DELETAR NOTIFICAÇÕES PRIMEIRO!
+            try:
+                notif_response = db.supabase.table("notificacoes").delete().eq("canal_id", canal_id).execute()
+                deleted_count = len(notif_response.data) if notif_response.data else 0
+                logger.info(f"Deleted {deleted_count} notifications for canal {canal_id}")
+            except Exception as e:
+                logger.warning(f"Error deleting notifications for canal {canal_id}: {e}")
+            
+            # Agora pode deletar o canal permanentemente
             await db.delete_canal_permanently(canal_id)
             return {"message": "Canal deletado permanentemente"}
         else:
+            # Apenas desativa o canal
             response = db.supabase.table("canais_monitorados").update({
                 "status": "inativo"
             }).eq("id", canal_id).execute()
@@ -697,8 +711,8 @@ async def run_collection_job():
         logger.info(f"🔑 Active keys: {stats['active_keys']}/{len(collector.api_keys)}")
         logger.info("=" * 80)
         
-        # ✅ ADICIONADO - VERIFICAR E CRIAR NOTIFICAÇÕES
-        if canais_sucesso > 0:  # Só roda se coletou algo
+        # VERIFICAR E CRIAR NOTIFICAÇÕES
+        if canais_sucesso > 0:
             try:
                 logger.info("=" * 80)
                 logger.info("🔔 CHECKING NOTIFICATIONS")
@@ -707,7 +721,6 @@ async def run_collection_job():
                 logger.info("✅ Notification check completed")
             except Exception as e:
                 logger.error(f"❌ Error checking notifications: {e}")
-                # Não falha a coleta se notificações falharem
         
         if canais_sucesso >= (total_canais * 0.5):
             logger.info("🧹 Cleanup threshold met (>50% success)")

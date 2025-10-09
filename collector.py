@@ -88,7 +88,7 @@ class YouTubeCollector:
         if not self.api_keys:
             raise ValueError("At least one YouTube API key is required")
         
-        # 🆕 Um RateLimiter para CADA chave
+        # Um RateLimiter para CADA chave
         self.rate_limiters = {i: RateLimiter() for i in range(len(self.api_keys))}
         
         self.current_key_index = 0
@@ -114,8 +114,6 @@ class YouTubeCollector:
         self.total_requests = 0
         self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal = {}
-        # NÃO limpa exhausted_keys - mantém registro do dia
-        # NÃO reseta current_key_index - continua de onde parou
         
         logger.info("=" * 80)
         logger.info("🔄 COLLECTOR RESET")
@@ -159,7 +157,7 @@ class YouTubeCollector:
         return self.api_keys[self.current_key_index]
 
     def rotate_to_next_key(self):
-        """🆕 Rotaciona para próxima chave disponível (round-robin)"""
+        """Rotaciona para próxima chave disponível (round-robin)"""
         old_index = self.current_key_index
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         
@@ -193,7 +191,7 @@ class YouTubeCollector:
 
     async def make_api_request(self, url: str, params: dict, canal_name: str = "system", retry_count: int = 0) -> Optional[dict]:
         """
-        🆕 FUNÇÃO CENTRAL para todas requisições da API
+        🆕 FUNÇÃO CORRIGIDA - Tratamento inteligente de erros 403
         Gerencia rate limiting, retries, e diferenciação de erros
         """
         if self.all_keys_exhausted():
@@ -206,7 +204,7 @@ class YouTubeCollector:
         
         params['key'] = current_key
         
-        # 🆕 AGUARDA RATE LIMITER
+        # AGUARDA RATE LIMITER
         await self.rate_limiters[self.current_key_index].wait_if_needed()
         
         try:
@@ -215,7 +213,7 @@ class YouTubeCollector:
                 self.increment_request_counter(canal_name)
                 self.rate_limiters[self.current_key_index].record_request()
                 
-                # Delay adaptativo base
+                # Delay base
                 if self.total_requests > 0:
                     await asyncio.sleep(self.base_delay)
                 
@@ -226,45 +224,55 @@ class YouTubeCollector:
                         data = await response.json()
                         return data
                     
-                    # ⚠️ ERRO 403 - Diferencia rate limit de quota
+                    # ⚠️ ERRO 403 - TRATAMENTO MELHORADO
                     elif response.status == 403:
                         error_data = await response.json()
                         error_obj = error_data.get('error', {})
                         error_msg = error_obj.get('message', '').lower()
                         error_reason = ''
                         if error_obj.get('errors'):
-                            error_reason = error_obj['errors'][0].get('reason', '')
+                            error_reason = error_obj['errors'][0].get('reason', '').lower()
                         
-                        # 🔴 RATE LIMIT EXCEEDED
-                        if 'ratelimit' in error_msg or 'ratelimit' in error_reason.lower():
-                            logger.warning(f"⏱️ RATE LIMIT hit on key {self.current_key_index + 1}")
-                            
-                            if retry_count < self.max_retries:
-                                wait_time = (2 ** retry_count) * 30  # 30s, 60s, 120s
-                                logger.info(f"♻️ Retry {retry_count + 1}/{self.max_retries} após {wait_time}s")
-                                await asyncio.sleep(wait_time)
-                                # Tenta de novo com MESMA chave
-                                return await self.make_api_request(url, params, canal_name, retry_count + 1)
-                            else:
-                                logger.error(f"❌ Max retries atingido - pulando requisição")
-                                return None
+                        # Log detalhado do erro
+                        logger.warning(f"⚠️ 403 Error - Message: '{error_msg}' | Reason: '{error_reason}'")
                         
-                        # 🔴 QUOTA EXCEEDED (quota diária esgotada)
-                        elif 'quota' in error_msg or 'quota' in error_reason.lower() or 'dailylimit' in error_reason.lower():
-                            logger.error(f"🚨 QUOTA EXCEEDED on key {self.current_key_index + 1}: {error_msg}")
+                        # 🔴 QUOTA EXCEEDED (diária esgotada) - MARCA COMO MORTA
+                        if 'quota' in error_msg or 'quota' in error_reason or 'dailylimit' in error_reason:
+                            logger.error(f"🚨 QUOTA EXCEEDED on key {self.current_key_index + 1}")
                             self.mark_key_as_exhausted()
                             
-                            # Tenta com PRÓXIMA chave se ainda tem tentativas
+                            # Tenta com próxima chave
                             if retry_count < self.max_retries and not self.all_keys_exhausted():
                                 logger.info(f"♻️ Tentando com próxima chave disponível...")
                                 return await self.make_api_request(url, params, canal_name, retry_count + 1)
+                            return None
+                        
+                        # 🟡 RATE LIMIT (temporário) - AGUARDA E TENTA DE NOVO
+                        elif 'ratelimit' in error_msg or 'ratelimit' in error_reason or 'usageratelimit' in error_reason:
+                            if retry_count < self.max_retries:
+                                wait_time = (2 ** retry_count) * 30  # 30s, 60s, 120s
+                                logger.warning(f"⏱️ RATE LIMIT hit on key {self.current_key_index + 1}")
+                                logger.info(f"♻️ Retry {retry_count + 1}/{self.max_retries} após {wait_time}s")
+                                await asyncio.sleep(wait_time)
+                                return await self.make_api_request(url, params, canal_name, retry_count + 1)
                             else:
+                                logger.error(f"❌ Max retries atingido após rate limit")
                                 return None
                         
-                        # 🔴 OUTRO ERRO 403 (canal privado, deletado, etc)
+                        # 🟠 403 GENÉRICO (sem especificar) - AGUARDA E TENTA DE NOVO
                         else:
-                            logger.warning(f"⚠️ 403 error (não quota/rate): {error_msg}")
-                            return None
+                            logger.warning(f"⚠️ 403 genérico (não quota/rate): {error_msg}")
+                            
+                            # 🆕 NÃO MARCA COMO EXHAUSTED! Tenta de novo com backoff
+                            if retry_count < self.max_retries:
+                                wait_time = (2 ** retry_count) * 15  # 15s, 30s, 60s
+                                logger.info(f"♻️ Tentando novamente após {wait_time}s (retry {retry_count + 1}/{self.max_retries})")
+                                await asyncio.sleep(wait_time)
+                                return await self.make_api_request(url, params, canal_name, retry_count + 1)
+                            else:
+                                # Só depois de 3 tentativas falhas, ENTÃO considera problema
+                                logger.warning(f"⚠️ 403 persistente após {self.max_retries} tentativas - pulando requisição")
+                                return None
                     
                     # ⚠️ OUTROS ERROS HTTP
                     else:
@@ -541,7 +549,7 @@ class YouTubeCollector:
             if self.all_keys_exhausted():
                 return None
             
-            # 🆕 Rotaciona para próxima chave antes de começar (round-robin)
+            # Rotaciona para próxima chave antes de começar (round-robin)
             self.rotate_to_next_key()
             
             channel_id = await self.get_channel_id(url_canal, canal_name)

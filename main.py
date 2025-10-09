@@ -10,6 +10,7 @@ import logging
 
 from database import SupabaseClient
 from collector import YouTubeCollector
+from notifier import NotificationChecker  # ✅ ADICIONADO - Import do notifier
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ app.add_middleware(
 
 db = SupabaseClient()
 collector = YouTubeCollector()
+notifier = NotificationChecker(db.supabase)  # ✅ ADICIONADO - Inicialização do notifier
 
 # Global flags
 collection_in_progress = False
@@ -695,11 +697,23 @@ async def run_collection_job():
         logger.info(f"🔑 Active keys: {stats['active_keys']}/{len(collector.api_keys)}")
         logger.info("=" * 80)
         
+        # ✅ ADICIONADO - VERIFICAR E CRIAR NOTIFICAÇÕES
+        if canais_sucesso > 0:  # Só roda se coletou algo
+            try:
+                logger.info("=" * 80)
+                logger.info("🔔 CHECKING NOTIFICATIONS")
+                logger.info("=" * 80)
+                await notifier.check_and_create_notifications()
+                logger.info("✅ Notification check completed")
+            except Exception as e:
+                logger.error(f"❌ Error checking notifications: {e}")
+                # Não falha a coleta se notificações falharem
+        
         if canais_sucesso >= (total_canais * 0.5):
             logger.info("🧹 Cleanup threshold met (>50% success)")
             await db.cleanup_old_data()
         else:
-            logger.warning(f"⭐ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
+            logger.warning(f"⏭ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
         
         if canais_erro == 0:
             status = "sucesso"

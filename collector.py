@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import logging
+import html  # 🆕 ADICIONADO
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Set
 from collections import deque
@@ -9,6 +10,14 @@ import aiohttp
 import json
 
 logger = logging.getLogger(__name__)
+
+# 🆕 FUNÇÃO PARA DECODIFICAR HTML ENTITIES
+def decode_html_entities(text: str) -> str:
+    """Decodifica HTML entities em texto (ex: &#39; -> ')"""
+    if not text:
+        return text
+    return html.unescape(text)
+
 
 class RateLimiter:
     """
@@ -433,7 +442,7 @@ class YouTubeCollector:
                 if details:
                     video_info = {
                         'video_id': item['id']['videoId'],
-                        'titulo': item['snippet']['title'],
+                        'titulo': decode_html_entities(item['snippet']['title']),  # 🆕 DECODIFICA HTML
                         'url_video': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
                         'data_publicacao': item['snippet']['publishedAt'],
                         'views_atuais': details.get('view_count', 0),

@@ -534,20 +534,33 @@ class SupabaseClient:
             raise
 
     # ========================================
-    # METODOS PARA NOTIFICACOES
+    # METODOS PARA NOTIFICACOES - 🆕 ATUALIZADO COM SUBNICHO
     # ========================================
     
     async def get_notificacoes_nao_vistas(self) -> List[Dict]:
         """
         Busca todas as notificacoes nao vistas (vista=false).
+        🆕 AGORA INCLUI O SUBNICHO DO CANAL
         
         Returns:
             Lista de notificacoes nao vistas, ordenadas da mais recente para a mais antiga
         """
         try:
-            response = self.supabase.table("notificacoes").select("*").eq(
-                "vista", False
-            ).order("data_disparo", desc=True).execute()
+            # 🆕 MODIFICADO: Agora faz LEFT JOIN com canais_monitorados para pegar subnicho
+            response = self.supabase.table("notificacoes").select(
+                "*, canais_monitorados!inner(subnicho)"
+            ).eq("vista", False).order("data_disparo", desc=True).execute()
+            
+            # Processar resposta para adicionar subnicho no nível raiz
+            if response.data:
+                for notif in response.data:
+                    # Mover subnicho do objeto aninhado para o nível raiz
+                    if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                        notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
+                    else:
+                        notif["subnicho"] = None
+                    # Remover objeto aninhado
+                    notif.pop("canais_monitorados", None)
             
             return response.data if response.data else []
         except Exception as e:
@@ -558,6 +571,7 @@ class SupabaseClient:
     async def get_notificacoes_all(self, limit: int = 50, offset: int = 0, vista_filter: Optional[bool] = None) -> List[Dict]:
         """
         Busca todas as notificacoes com filtros opcionais.
+        🆕 AGORA INCLUI O SUBNICHO DO CANAL
         
         Args:
             limit: Numero maximo de resultados
@@ -568,12 +582,26 @@ class SupabaseClient:
             Lista de notificacoes
         """
         try:
-            query = self.supabase.table("notificacoes").select("*")
+            # 🆕 MODIFICADO: Agora faz LEFT JOIN com canais_monitorados para pegar subnicho
+            query = self.supabase.table("notificacoes").select(
+                "*, canais_monitorados(subnicho)"
+            )
             
             if vista_filter is not None:
                 query = query.eq("vista", vista_filter)
             
             response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
+            
+            # Processar resposta para adicionar subnicho no nível raiz
+            if response.data:
+                for notif in response.data:
+                    # Mover subnicho do objeto aninhado para o nível raiz
+                    if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                        notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
+                    else:
+                        notif["subnicho"] = None
+                    # Remover objeto aninhado
+                    notif.pop("canais_monitorados", None)
             
             return response.data if response.data else []
         except Exception as e:

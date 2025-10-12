@@ -218,7 +218,8 @@ class SupabaseClient:
 
     async def cleanup_stuck_collections(self):
         try:
-            timeout_threshold = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+            # 🆕 TIMEOUT AUMENTADO: 30 → 60 minutos
+            timeout_threshold = (datetime.now(timezone.utc) - timedelta(minutes=60)).isoformat()
             stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
             
             if stuck_collections.data:
@@ -226,7 +227,7 @@ class SupabaseClient:
                     self.supabase.table("coletas_historico").update({
                         "status": "erro",
                         "data_fim": datetime.now(timezone.utc).isoformat(),
-                        "mensagem_erro": "Coleta travada - timeout de 30 minutos excedido"
+                        "mensagem_erro": "Coleta travada - timeout de 60 minutos excedido"  # 🆕 ATUALIZADO
                     }).eq("id", coleta["id"]).execute()
             
             return len(stuck_collections.data) if stuck_collections.data else 0

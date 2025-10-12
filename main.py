@@ -229,7 +229,7 @@ async def update_canal(
         raise HTTPException(status_code=500, detail=str(e))
 
 async def can_start_collection() -> tuple[bool, str]:
-    """Check if a new collection can start (5 min cooldown only)"""
+    """Check if a new collection can start (1 min cooldown only)"""
     global collection_in_progress, last_collection_time
     
     if collection_in_progress:
@@ -237,13 +237,12 @@ async def can_start_collection() -> tuple[bool, str]:
     
     if last_collection_time:
         time_since_last = datetime.now(timezone.utc) - last_collection_time
-        cooldown = timedelta(minutes=5)
+        cooldown = timedelta(minutes=1)  # 🆕 COOLDOWN DE 1 MINUTO
         
         if time_since_last < cooldown:
             remaining = cooldown - time_since_last
-            minutes = int(remaining.total_seconds() // 60)
-            seconds = int(remaining.total_seconds() % 60)
-            return False, f"Cooldown: aguarde {minutes}m {seconds}s"
+            seconds = int(remaining.total_seconds())
+            return False, f"Cooldown: aguarde {seconds}s"
     
     try:
         await db.cleanup_stuck_collections()
@@ -290,9 +289,11 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         historico = await db.get_coletas_historico(limit=limit)
         
         quota_usada_hoje = await db.get_quota_diaria_usada()
-        quota_total = 60000
+        
+        # 🆕 CÁLCULO AUTOMÁTICO baseado em quantas chaves estão ativas
+        quota_total = len(collector.api_keys) * 10000  
         quota_disponivel = quota_total - quota_usada_hoje
-        porcentagem_usada = (quota_usada_hoje / quota_total) * 100
+        porcentagem_usada = (quota_usada_hoje / quota_total) * 100 if quota_total > 0 else 0
         
         return {
             "historico": historico,
@@ -301,7 +302,8 @@ async def get_coletas_historico(limit: Optional[int] = 20):
                 "total_diario": quota_total,
                 "usado_hoje": quota_usada_hoje,
                 "disponivel": quota_disponivel,
-                "porcentagem_usada": round(porcentagem_usada, 1)
+                "porcentagem_usada": round(porcentagem_usada, 1),
+                "chaves_ativas": len(collector.api_keys)  # 🆕 BONUS: mostra quantas chaves tem
             }
         }
     except Exception as e:
@@ -795,10 +797,21 @@ async def startup_event():
 
 async def schedule_daily_collection():
     """Schedule collection daily at 10:00 UTC = 7:00 AM Brasilia"""
+    
+    # 🆕 PROTEÇÃO CONTRA COLETAS EM DEPLOY (5 minutos)
+    logger.info("=" * 80)
+    logger.info("⏰ PROTEÇÃO DE STARTUP ATIVADA")
+    logger.info("⏳ Aguardando 5 minutos para evitar coletas durante deploy...")
+    logger.info("=" * 80)
+    await asyncio.sleep(300)  # 5 minutos = 300 segundos
+    logger.info("✅ Proteção de startup completa - scheduler ativo")
+    
+    # Agora sim, entra no loop de agendamento
     while True:
         try:
             now = datetime.now(timezone.utc)
             
+            # Próxima coleta: 10:00 UTC (= 07:00 AM São Paulo)
             next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
             
             if next_run <= now:
@@ -807,7 +820,7 @@ async def schedule_daily_collection():
             sleep_seconds = (next_run - now).total_seconds()
             
             logger.info("=" * 80)
-            logger.info(f"⏰ Next collection: {next_run.isoformat()}")
+            logger.info(f"⏰ Next collection: {next_run.isoformat()} (07:00 AM São Paulo)")
             logger.info(f"⏳ Sleeping for {sleep_seconds/3600:.1f} hours")
             logger.info("=" * 80)
             

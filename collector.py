@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import logging
-import html  # 🆕 ADICIONADO
+import html
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Set
 from collections import deque
@@ -83,7 +83,7 @@ class RateLimiter:
 
 class YouTubeCollector:
     def __init__(self):
-        # 🆕 ATUALIZADO: Agora busca até KEY_10 (9 chaves no total)
+        # Busca todas as chaves de API (KEY_1 até KEY_10)
         self.api_keys = [
             os.environ.get("YOUTUBE_API_KEY_1"),
             os.environ.get("YOUTUBE_API_KEY_2"),
@@ -91,12 +91,13 @@ class YouTubeCollector:
             os.environ.get("YOUTUBE_API_KEY_4"),
             os.environ.get("YOUTUBE_API_KEY_5"),
             os.environ.get("YOUTUBE_API_KEY_6"),
-            os.environ.get("YOUTUBE_API_KEY_7"),   # 🆕 NOVO
-            os.environ.get("YOUTUBE_API_KEY_8"),   # 🆕 NOVO
-            os.environ.get("YOUTUBE_API_KEY_9"),   # 🆕 NOVO
-            os.environ.get("YOUTUBE_API_KEY_10")   # 🆕 NOVO
+            os.environ.get("YOUTUBE_API_KEY_7"),
+            os.environ.get("YOUTUBE_API_KEY_8"),
+            os.environ.get("YOUTUBE_API_KEY_9"),
+            os.environ.get("YOUTUBE_API_KEY_10")
         ]
         
+        # Filtra apenas chaves que existem
         self.api_keys = [key for key in self.api_keys if key]
         
         if not self.api_keys:
@@ -107,6 +108,7 @@ class YouTubeCollector:
         
         self.current_key_index = 0
         self.exhausted_keys = set()
+        self.last_reset_date = datetime.now(timezone.utc).date()  # 🆕 Rastrear último reset
         self.base_url = "https://www.googleapis.com/youtube/v3"
         
         # REQUEST COUNTER
@@ -123,11 +125,23 @@ class YouTubeCollector:
         logger.info(f"📊 Rate limiter: {self.rate_limiters[0].max_requests} req/{self.rate_limiters[0].time_window}s per key")
 
     def reset_for_new_collection(self):
-        """Reset collector state - MANTÉM exhausted_keys do dia"""
+        """
+        Reset collector state - RESETA exhausted_keys se passou da meia-noite UTC
+        Google reseta quota à meia-noite UTC, então devemos resetar nossa flag também
+        """
         self.failed_canals = set()
         self.total_requests = 0
         self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal = {}
+        
+        # 🆕 RESETAR CHAVES ESGOTADAS A CADA NOVA COLETA
+        # Pois quota do Google já resetou à meia-noite UTC
+        if self.exhausted_keys:
+            logger.info("=" * 80)
+            logger.info(f"🔄 RESETANDO {len(self.exhausted_keys)} CHAVES MARCADAS COMO ESGOTADAS")
+            logger.info("✅ Quota do Google resetou à meia-noite UTC - todas chaves disponíveis novamente")
+            logger.info("=" * 80)
+            self.exhausted_keys.clear()
         
         logger.info("=" * 80)
         logger.info("🔄 COLLECTOR RESET")
@@ -205,7 +219,7 @@ class YouTubeCollector:
 
     async def make_api_request(self, url: str, params: dict, canal_name: str = "system", retry_count: int = 0) -> Optional[dict]:
         """
-        🆕 FUNÇÃO CORRIGIDA - Tratamento inteligente de erros 403
+        Função para fazer requisições à API do YouTube
         Gerencia rate limiting, retries, e diferenciação de erros
         """
         if self.all_keys_exhausted():
@@ -277,7 +291,7 @@ class YouTubeCollector:
                         else:
                             logger.warning(f"⚠️ 403 genérico (não quota/rate): {error_msg}")
                             
-                            # 🆕 NÃO MARCA COMO EXHAUSTED! Tenta de novo com backoff
+                            # NÃO MARCA COMO EXHAUSTED! Tenta de novo com backoff
                             if retry_count < self.max_retries:
                                 wait_time = (2 ** retry_count) * 15  # 15s, 30s, 60s
                                 logger.info(f"♻️ Tentando novamente após {wait_time}s (retry {retry_count + 1}/{self.max_retries})")
@@ -447,7 +461,7 @@ class YouTubeCollector:
                 if details:
                     video_info = {
                         'video_id': item['id']['videoId'],
-                        'titulo': decode_html_entities(item['snippet']['title']),  # 🆕 DECODIFICA HTML
+                        'titulo': decode_html_entities(item['snippet']['title']),
                         'url_video': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
                         'data_publicacao': item['snippet']['publishedAt'],
                         'views_atuais': details.get('view_count', 0),

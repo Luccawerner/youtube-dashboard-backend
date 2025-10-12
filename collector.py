@@ -83,13 +83,18 @@ class RateLimiter:
 
 class YouTubeCollector:
     def __init__(self):
+        # 🆕 ATUALIZADO: Agora busca até KEY_10 (9 chaves no total)
         self.api_keys = [
             os.environ.get("YOUTUBE_API_KEY_1"),
             os.environ.get("YOUTUBE_API_KEY_2"),
             os.environ.get("YOUTUBE_API_KEY_3"),
             os.environ.get("YOUTUBE_API_KEY_4"),
             os.environ.get("YOUTUBE_API_KEY_5"),
-            os.environ.get("YOUTUBE_API_KEY_6")
+            os.environ.get("YOUTUBE_API_KEY_6"),
+            os.environ.get("YOUTUBE_API_KEY_7"),   # 🆕 NOVO
+            os.environ.get("YOUTUBE_API_KEY_8"),   # 🆕 NOVO
+            os.environ.get("YOUTUBE_API_KEY_9"),   # 🆕 NOVO
+            os.environ.get("YOUTUBE_API_KEY_10")   # 🆕 NOVO
         ]
         
         self.api_keys = [key for key in self.api_keys if key]

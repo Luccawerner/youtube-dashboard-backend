@@ -11,7 +11,6 @@ import logging
 from database import SupabaseClient
 from collector import YouTubeCollector
 from notifier import NotificationChecker
-from transcriber import VideoTranscriber
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,7 +28,6 @@ app.add_middleware(
 db = SupabaseClient()
 collector = YouTubeCollector()
 notifier = NotificationChecker(db.supabase)
-transcriber = VideoTranscriber()
 
 collection_in_progress = False
 last_collection_time = None
@@ -591,30 +589,6 @@ async def toggle_regra_notificacao(regra_id: int):
         raise
     except Exception as e:
         logger.error(f"Error toggling regra: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/transcricao/{video_id}")
-async def get_video_transcricao(video_id: str):
-    try:
-        result = await transcriber.get_transcript(video_id)
-        
-        if result['success']:
-            return {
-                "success": True,
-                "video_id": video_id,
-                "transcricao": result['text'],
-                "idioma": result['language_name'],
-                "idioma_codigo": result['language'],
-                "tamanho": result['length']
-            }
-        else:
-            return {
-                "success": False,
-                "video_id": video_id,
-                "error": result['error']
-            }
-    except Exception as e:
-        logger.error(f"Error getting transcricao: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def run_collection_job():

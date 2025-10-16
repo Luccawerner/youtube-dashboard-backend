@@ -1,10 +1,14 @@
 """
-Sistema de Transcrição de Vídeos do YouTube - Versão Simplificada
+Sistema de Transcrição de Vídeos do YouTube - Versão com yt-dlp
 """
 
 import logging
 from typing import Optional, Dict
 import re
+import subprocess
+import json
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 class VideoTranscriber:
     
     def __init__(self):
-        logger.info("VideoTranscriber inicializado")
+        logger.info("VideoTranscriber inicializado com yt-dlp")
     
     
     def extract_video_id(self, url_or_id: str) -> Optional[str]:
@@ -53,65 +57,105 @@ class VideoTranscriber:
     
     async def get_transcript(self, video_id: str) -> Dict:
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi
+            logger.info(f"Buscando transcrição com yt-dlp: {video_id}")
             
-            logger.info(f"Buscando transcrição: {video_id}")
+            url = f"https://www.youtube.com/watch?v={video_id}"
             
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            transcript = None
-            language_name = "Unknown"
-            language_code = "unknown"
-            
-            for t in transcript_list:
-                transcript = t
-                language_code = t.language_code
-                language_name = t.language
-                logger.info(f"Encontrada: {language_name}")
-                break
-            
-            if not transcript:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                subtitle_file = os.path.join(temp_dir, "subtitle.%(ext)s")
+                
+                cmd = [
+                    "yt-dlp",
+                    "--skip-download",
+                    "--write-auto-subs",
+                    "--sub-format", "json3",
+                    "--sub-langs", "all",
+                    "-o", subtitle_file,
+                    url
+                ]
+                
+                logger.info(f"Executando: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode != 0:
+                    logger.error(f"yt-dlp falhou: {result.stderr}")
+                    return {
+                        'success': False,
+                        'error': 'Não foi possível baixar legendas. Vídeo pode não ter legendas disponíveis.',
+                        'video_id': video_id
+                    }
+                
+                json_files = [f for f in os.listdir(temp_dir) if f.endswith('.json3')]
+                
+                if not json_files:
+                    logger.warning(f"Nenhuma legenda encontrada para {video_id}")
+                    return {
+                        'success': False,
+                        'error': 'Nenhuma legenda disponível para este vídeo',
+                        'video_id': video_id
+                    }
+                
+                subtitle_path = os.path.join(temp_dir, json_files[0])
+                
+                language_code = "unknown"
+                if "." in json_files[0]:
+                    parts = json_files[0].split(".")
+                    if len(parts) >= 2:
+                        language_code = parts[-2]
+                
+                with open(subtitle_path, 'r', encoding='utf-8') as f:
+                    subtitle_data = json.load(f)
+                
+                texts = []
+                if 'events' in subtitle_data:
+                    for event in subtitle_data['events']:
+                        if 'segs' in event:
+                            for seg in event['segs']:
+                                if 'utf8' in seg:
+                                    texts.append(seg['utf8'])
+                
+                if not texts:
+                    return {
+                        'success': False,
+                        'error': 'Legendas vazias ou formato inválido',
+                        'video_id': video_id
+                    }
+                
+                raw_text = ' '.join(texts)
+                cleaned = self.clean_text(raw_text)
+                formatted = self.split_into_paragraphs(cleaned)
+                
+                logger.info(f"Sucesso! {len(formatted)} caracteres em {language_code}")
+                
                 return {
-                    'success': False,
-                    'error': 'Nenhuma transcrição disponível',
-                    'video_id': video_id
+                    'success': True,
+                    'text': formatted,
+                    'raw_text': cleaned,
+                    'language': language_code,
+                    'language_name': language_code.upper(),
+                    'video_id': video_id,
+                    'length': len(formatted)
                 }
-            
-            data = transcript.fetch()
-            
-            if not data:
-                return {
-                    'success': False,
-                    'error': 'Transcrição vazia',
-                    'video_id': video_id
-                }
-            
-            raw_text = ' '.join([item['text'] for item in data])
-            cleaned = self.clean_text(raw_text)
-            formatted = self.split_into_paragraphs(cleaned)
-            
-            logger.info(f"Sucesso! {len(formatted)} caracteres")
-            
-            return {
-                'success': True,
-                'text': formatted,
-                'raw_text': cleaned,
-                'language': language_code,
-                'language_name': language_name,
-                'video_id': video_id,
-                'length': len(formatted)
-            }
-            
-        except ImportError:
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout ao buscar legendas de {video_id}")
             return {
                 'success': False,
-                'error': 'Biblioteca não instalada',
+                'error': 'Timeout ao buscar legendas (vídeo muito longo ou conexão lenta)',
                 'video_id': video_id
             }
         except Exception as e:
             logger.error(f"Erro: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 'success': False,
-                'error': str(e),
+                'error': f'Erro ao buscar legendas: {str(e)}',
                 'video_id': video_id
             }

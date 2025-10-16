@@ -593,7 +593,7 @@ async def toggle_regra_notificacao(regra_id: int):
         logger.error(f"Error toggling regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/transcricao/{video_id}")
+@app.get("/api/transcricao/{video_id}")
 async def get_video_transcricao(video_id: str):
     try:
         result = await transcriber.get_transcript(video_id)

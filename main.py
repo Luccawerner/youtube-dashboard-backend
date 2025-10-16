@@ -11,6 +11,7 @@ import logging
 from database import SupabaseClient
 from collector import YouTubeCollector
 from notifier import NotificationChecker
+from transcriber import VideoTranscriber
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,8 +29,8 @@ app.add_middleware(
 db = SupabaseClient()
 collector = YouTubeCollector()
 notifier = NotificationChecker(db.supabase)
+transcriber = VideoTranscriber()
 
-# Global flags
 collection_in_progress = False
 last_collection_time = None
 
@@ -204,7 +205,6 @@ async def update_canal(
     tipo: str = "minerado",
     status: str = "ativo"
 ):
-    """Update existing canal"""
     try:
         canal_exists = db.supabase.table("canais_monitorados").select("id").eq("id", canal_id).execute()
         if not canal_exists.data:
@@ -229,7 +229,6 @@ async def update_canal(
         raise HTTPException(status_code=500, detail=str(e))
 
 async def can_start_collection() -> tuple[bool, str]:
-    """Check if a new collection can start (1 min cooldown only)"""
     global collection_in_progress, last_collection_time
     
     if collection_in_progress:
@@ -237,7 +236,7 @@ async def can_start_collection() -> tuple[bool, str]:
     
     if last_collection_time:
         time_since_last = datetime.now(timezone.utc) - last_collection_time
-        cooldown = timedelta(minutes=1)  # 🆕 COOLDOWN DE 1 MINUTO
+        cooldown = timedelta(minutes=1)
         
         if time_since_last < cooldown:
             remaining = cooldown - time_since_last
@@ -290,7 +289,6 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         
         quota_usada_hoje = await db.get_quota_diaria_usada()
         
-        # 🆕 CÁLCULO AUTOMÁTICO baseado em quantas chaves estão ativas
         quota_total = len(collector.api_keys) * 10000  
         quota_disponivel = quota_total - quota_usada_hoje
         porcentagem_usada = (quota_usada_hoje / quota_total) * 100 if quota_total > 0 else 0
@@ -303,7 +301,7 @@ async def get_coletas_historico(limit: Optional[int] = 20):
                 "usado_hoje": quota_usada_hoje,
                 "disponivel": quota_disponivel,
                 "porcentagem_usada": round(porcentagem_usada, 1),
-                "chaves_ativas": len(collector.api_keys)  # 🆕 BONUS: mostra quantas chaves tem
+                "chaves_ativas": len(collector.api_keys)
             }
         }
     except Exception as e:
@@ -383,13 +381,8 @@ async def get_favoritos_videos():
 
 @app.delete("/api/canais/{canal_id}")
 async def delete_canal(canal_id: int, permanent: bool = False):
-    """
-    Delete canal - desativa ou deleta permanentemente
-    Se permanent=True, deleta notificações primeiro para evitar violação de foreign key
-    """
     try:
         if permanent:
-            # 🆕 DELETAR NOTIFICAÇÕES PRIMEIRO!
             try:
                 notif_response = db.supabase.table("notificacoes").delete().eq("canal_id", canal_id).execute()
                 deleted_count = len(notif_response.data) if notif_response.data else 0
@@ -397,11 +390,9 @@ async def delete_canal(canal_id: int, permanent: bool = False):
             except Exception as e:
                 logger.warning(f"Error deleting notifications for canal {canal_id}: {e}")
             
-            # Agora pode deletar o canal permanentemente
             await db.delete_canal_permanently(canal_id)
             return {"message": "Canal deletado permanentemente"}
         else:
-            # Apenas desativa o canal
             response = db.supabase.table("canais_monitorados").update({
                 "status": "inativo"
             }).eq("id", canal_id).execute()
@@ -410,14 +401,8 @@ async def delete_canal(canal_id: int, permanent: bool = False):
         logger.error(f"Error deleting canal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ========================================
-# 🔔 NOVOS ENDPOINTS - NOTIFICAÇÕES
-# ========================================
-
 @app.get("/api/notificacoes")
 async def get_notificacoes_nao_vistas():
-    """Retorna apenas notificações não vistas"""
     try:
         notificacoes = await db.get_notificacoes_nao_vistas()
         return {
@@ -428,14 +413,12 @@ async def get_notificacoes_nao_vistas():
         logger.error(f"Error fetching notificacoes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/notificacoes/todas")
 async def get_notificacoes_todas(
     limit: Optional[int] = 50,
     offset: Optional[int] = 0,
     vista: Optional[bool] = None
 ):
-    """Retorna todas as notificações com filtros opcionais"""
     try:
         notificacoes = await db.get_notificacoes_all(
             limit=limit,
@@ -450,10 +433,8 @@ async def get_notificacoes_todas(
         logger.error(f"Error fetching all notificacoes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/notificacoes/historico")
 async def get_notificacoes_historico(limit: Optional[int] = 100):
-    """Retorna histórico completo de notificações"""
     try:
         notificacoes = await db.get_notificacoes_all(limit=limit, offset=0)
         return {
@@ -464,10 +445,8 @@ async def get_notificacoes_historico(limit: Optional[int] = 100):
         logger.error(f"Error fetching historico: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.put("/api/notificacoes/{notif_id}/marcar-vista")
 async def marcar_notificacao_vista(notif_id: int):
-    """Marca uma notificação específica como vista"""
     try:
         success = await db.marcar_notificacao_vista(notif_id)
         
@@ -484,10 +463,8 @@ async def marcar_notificacao_vista(notif_id: int):
         logger.error(f"Error marking notificacao as vista: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/notificacoes/marcar-todas")
 async def marcar_todas_notificacoes_vistas():
-    """Marca todas as notificações não vistas como vistas"""
     try:
         count = await db.marcar_todas_notificacoes_vistas()
         return {
@@ -498,10 +475,8 @@ async def marcar_todas_notificacoes_vistas():
         logger.error(f"Error marking all notificacoes as vistas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/notificacoes/stats")
 async def get_notificacoes_stats():
-    """Retorna estatísticas das notificações"""
     try:
         stats = await db.get_notificacao_stats()
         return stats
@@ -509,14 +484,8 @@ async def get_notificacoes_stats():
         logger.error(f"Error fetching notificacao stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ========================================
-# 📋 NOVOS ENDPOINTS - REGRAS
-# ========================================
-
 @app.get("/api/regras-notificacoes")
 async def get_regras_notificacoes():
-    """Retorna todas as regras de notificações"""
     try:
         regras = await db.get_regras_notificacoes()
         return {
@@ -527,7 +496,6 @@ async def get_regras_notificacoes():
         logger.error(f"Error fetching regras: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/regras-notificacoes")
 async def create_regra_notificacao(
     nome_regra: str,
@@ -536,7 +504,6 @@ async def create_regra_notificacao(
     tipo_canal: str = "ambos",
     ativa: bool = True
 ):
-    """Cria uma nova regra de notificação"""
     try:
         regra_data = {
             "nome_regra": nome_regra,
@@ -559,7 +526,6 @@ async def create_regra_notificacao(
         logger.error(f"Error creating regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.put("/api/regras-notificacoes/{regra_id}")
 async def update_regra_notificacao(
     regra_id: int,
@@ -569,7 +535,6 @@ async def update_regra_notificacao(
     tipo_canal: str = "ambos",
     ativa: bool = True
 ):
-    """Atualiza uma regra existente"""
     try:
         regra_data = {
             "nome_regra": nome_regra,
@@ -594,10 +559,8 @@ async def update_regra_notificacao(
         logger.error(f"Error updating regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.delete("/api/regras-notificacoes/{regra_id}")
 async def delete_regra_notificacao(regra_id: int):
-    """Deleta uma regra"""
     try:
         success = await db.delete_regra_notificacao(regra_id)
         
@@ -611,10 +574,8 @@ async def delete_regra_notificacao(regra_id: int):
         logger.error(f"Error deleting regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.put("/api/regras-notificacoes/{regra_id}/toggle")
 async def toggle_regra_notificacao(regra_id: int):
-    """Ativa/desativa uma regra (toggle)"""
     try:
         result = await db.toggle_regra_notificacao(regra_id)
         
@@ -632,14 +593,31 @@ async def toggle_regra_notificacao(regra_id: int):
         logger.error(f"Error toggling regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ========================================
-# FIM DOS NOVOS ENDPOINTS
-# ========================================
-
+@app.post("/api/transcricao/{video_id}")
+async def get_video_transcricao(video_id: str):
+    try:
+        result = await transcriber.get_transcript(video_id)
+        
+        if result['success']:
+            return {
+                "success": True,
+                "video_id": video_id,
+                "transcricao": result['text'],
+                "idioma": result['language_name'],
+                "idioma_codigo": result['language'],
+                "tamanho": result['length']
+            }
+        else:
+            return {
+                "success": False,
+                "video_id": video_id,
+                "error": result['error']
+            }
+    except Exception as e:
+        logger.error(f"Error getting transcricao: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def run_collection_job():
-    """Main collection job with intelligent quota management"""
     global collection_in_progress, last_collection_time
     
     coleta_id = None
@@ -713,7 +691,6 @@ async def run_collection_job():
         logger.info(f"🔑 Active keys: {stats['active_keys']}/{len(collector.api_keys)}")
         logger.info("=" * 80)
         
-        # VERIFICAR E CRIAR NOTIFICAÇÕES
         if canais_sucesso > 0:
             try:
                 logger.info("=" * 80)
@@ -728,7 +705,7 @@ async def run_collection_job():
             logger.info("🧹 Cleanup threshold met (>50% success)")
             await db.cleanup_old_data()
         else:
-            logger.warning(f"⏭ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
+            logger.warning(f"⭐ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
         
         if canais_erro == 0:
             status = "sucesso"
@@ -775,7 +752,6 @@ async def run_collection_job():
 
 @app.on_event("startup")
 async def startup_event():
-    """Startup - NEVER triggers collection, only schedules next one"""
     logger.info("=" * 80)
     logger.info("🚀 YOUTUBE DASHBOARD API STARTING")
     logger.info("=" * 80)
@@ -796,22 +772,17 @@ async def startup_event():
     logger.info("=" * 80)
 
 async def schedule_daily_collection():
-    """Schedule collection daily at 10:00 UTC = 7:00 AM Brasilia"""
-    
-    # 🆕 PROTEÇÃO CONTRA COLETAS EM DEPLOY (5 minutos)
     logger.info("=" * 80)
     logger.info("⏰ PROTEÇÃO DE STARTUP ATIVADA")
     logger.info("⏳ Aguardando 5 minutos para evitar coletas durante deploy...")
     logger.info("=" * 80)
-    await asyncio.sleep(300)  # 5 minutos = 300 segundos
+    await asyncio.sleep(300)
     logger.info("✅ Proteção de startup completa - scheduler ativo")
     
-    # Agora sim, entra no loop de agendamento
     while True:
         try:
             now = datetime.now(timezone.utc)
             
-            # Próxima coleta: 10:00 UTC (= 07:00 AM São Paulo)
             next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
             
             if next_run <= now:

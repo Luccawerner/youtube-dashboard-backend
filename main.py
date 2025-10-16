@@ -68,7 +68,7 @@ async def get_canais(
     views_7d_min: Optional[int] = None,
     score_min: Optional[float] = None,
     growth_min: Optional[float] = None,
-    limit: Optional[int] = 100,
+    limit: Optional[int] = 500,
     offset: Optional[int] = 0
 ):
     try:

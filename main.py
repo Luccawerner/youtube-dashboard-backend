@@ -591,6 +591,94 @@ async def toggle_regra_notificacao(regra_id: int):
         logger.error(f"Error toggling regra: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/transcribe")
+async def transcribe_video(video_id: str):
+    """
+    Transcreve vídeo do YouTube
+    - Verifica cache primeiro
+    - Se não existir, baixa e transcreve
+    - Retorna texto limpo sem timestamps
+    """
+    try:
+        logger.info(f"🎬 Transcription request for video: {video_id}")
+        
+        # 1. Verificar cache
+        cached = await db.get_cached_transcription(video_id)
+        if cached:
+            logger.info(f"✅ Using cached transcription for: {video_id}")
+            return {
+                "transcription": cached,
+                "from_cache": True,
+                "video_id": video_id
+            }
+        
+        logger.info(f"📥 No cache found, processing video: {video_id}")
+        
+        # 2. Baixar vídeo
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info(f"⬇️ Downloading video from: {video_url}")
+        
+        import requests
+        import base64
+        
+        download_response = requests.post(
+            "https://download.2growai.com.br",
+            json={"video_url": video_url},
+            timeout=120
+        )
+        
+        if download_response.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to download video")
+        
+        download_data = download_response.json()
+        logger.info(f"✅ Video downloaded: {download_data.get('video_id')}")
+        
+        # 3. Transcrever com WhisperX
+        logger.info(f"🎤 Transcribing video...")
+        
+        video_binary = base64.b64decode(download_data['data'])
+        
+        files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
+        data = {'language': ''}  # Auto-detect
+        
+        transcription_response = requests.post(
+            "http://187.94.111.238:6127/transcribe",
+            files=files,
+            data=data,
+            timeout=300
+        )
+        
+        if transcription_response.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to transcribe video")
+        
+        transcription_data = transcription_response.json()
+        logger.info(f"✅ Transcription completed: {len(transcription_data.get('segments', []))} segments")
+        
+        # 4. Formatar texto (remover timestamps)
+        clean_text = " ".join([
+            segment['text'].strip() 
+            for segment in transcription_data.get('segments', [])
+        ])
+        
+        logger.info(f"📝 Formatted transcription: {len(clean_text)} characters")
+        
+        # 5. Salvar cache
+        await db.save_transcription_cache(video_id, clean_text)
+        
+        # 6. Retornar
+        return {
+            "transcription": clean_text,
+            "from_cache": False,
+            "video_id": video_id,
+            "segments_count": len(transcription_data.get('segments', []))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error transcribing video {video_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 async def run_collection_job():
     global collection_in_progress, last_collection_time
     
@@ -679,7 +767,7 @@ async def run_collection_job():
             logger.info("🧹 Cleanup threshold met (>50% success)")
             await db.cleanup_old_data()
         else:
-            logger.warning(f"⭐ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
+            logger.warning(f"⭕ Skipping cleanup - only {canais_sucesso}/{total_canais} succeeded")
         
         if canais_erro == 0:
             status = "sucesso"

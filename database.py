@@ -218,7 +218,6 @@ class SupabaseClient:
 
     async def cleanup_stuck_collections(self):
         try:
-            # 🆕 TIMEOUT AUMENTADO: 30 → 60 minutos
             timeout_threshold = (datetime.now(timezone.utc) - timedelta(minutes=60)).isoformat()
             stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
             
@@ -227,7 +226,7 @@ class SupabaseClient:
                     self.supabase.table("coletas_historico").update({
                         "status": "erro",
                         "data_fim": datetime.now(timezone.utc).isoformat(),
-                        "mensagem_erro": "Coleta travada - timeout de 60 minutos excedido"  # 🆕 ATUALIZADO
+                        "mensagem_erro": "Coleta travada - timeout de 60 minutos excedido"
                     }).eq("id", coleta["id"]).execute()
             
             return len(stuck_collections.data) if stuck_collections.data else 0
@@ -534,33 +533,18 @@ class SupabaseClient:
             logger.error(f"Error deleting canal permanently: {e}")
             raise
 
-    # ========================================
-    # METODOS PARA NOTIFICACOES - 🆕 ATUALIZADO COM SUBNICHO
-    # ========================================
-    
     async def get_notificacoes_nao_vistas(self) -> List[Dict]:
-        """
-        Busca todas as notificacoes nao vistas (vista=false).
-        🆕 AGORA INCLUI O SUBNICHO DO CANAL
-        
-        Returns:
-            Lista de notificacoes nao vistas, ordenadas da mais recente para a mais antiga
-        """
         try:
-            # 🆕 MODIFICADO: Agora faz LEFT JOIN com canais_monitorados para pegar subnicho
             response = self.supabase.table("notificacoes").select(
                 "*, canais_monitorados!inner(subnicho)"
             ).eq("vista", False).order("data_disparo", desc=True).execute()
             
-            # Processar resposta para adicionar subnicho no nível raiz
             if response.data:
                 for notif in response.data:
-                    # Mover subnicho do objeto aninhado para o nível raiz
                     if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
                         notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
                     else:
                         notif["subnicho"] = None
-                    # Remover objeto aninhado
                     notif.pop("canais_monitorados", None)
             
             return response.data if response.data else []
@@ -568,22 +552,8 @@ class SupabaseClient:
             logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
             return []
     
-    
     async def get_notificacoes_all(self, limit: int = 50, offset: int = 0, vista_filter: Optional[bool] = None) -> List[Dict]:
-        """
-        Busca todas as notificacoes com filtros opcionais.
-        🆕 AGORA INCLUI O SUBNICHO DO CANAL
-        
-        Args:
-            limit: Numero maximo de resultados
-            offset: Numero de resultados para pular (paginacao)
-            vista_filter: Se True, apenas vistas. Se False, apenas nao vistas. Se None, todas.
-        
-        Returns:
-            Lista de notificacoes
-        """
         try:
-            # 🆕 MODIFICADO: Agora faz LEFT JOIN com canais_monitorados para pegar subnicho
             query = self.supabase.table("notificacoes").select(
                 "*, canais_monitorados(subnicho)"
             )
@@ -593,15 +563,12 @@ class SupabaseClient:
             
             response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
             
-            # Processar resposta para adicionar subnicho no nível raiz
             if response.data:
                 for notif in response.data:
-                    # Mover subnicho do objeto aninhado para o nível raiz
                     if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
                         notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
                     else:
                         notif["subnicho"] = None
-                    # Remover objeto aninhado
                     notif.pop("canais_monitorados", None)
             
             return response.data if response.data else []
@@ -609,17 +576,7 @@ class SupabaseClient:
             logger.error(f"Erro ao buscar notificacoes: {e}")
             return []
     
-    
     async def marcar_notificacao_vista(self, notif_id: int) -> bool:
-        """
-        Marca uma notificacao como vista.
-        
-        Args:
-            notif_id: ID da notificacao
-        
-        Returns:
-            True se sucesso, False se erro
-        """
         try:
             response = self.supabase.table("notificacoes").update({
                 "vista": True,
@@ -631,14 +588,7 @@ class SupabaseClient:
             logger.error(f"Erro ao marcar notificacao como vista: {e}")
             return False
     
-    
     async def marcar_todas_notificacoes_vistas(self) -> int:
-        """
-        Marca todas as notificacoes nao vistas como vistas.
-        
-        Returns:
-            Numero de notificacoes marcadas
-        """
         try:
             response = self.supabase.table("notificacoes").update({
                 "vista": True,
@@ -650,32 +600,20 @@ class SupabaseClient:
             logger.error(f"Erro ao marcar todas notificacoes como vistas: {e}")
             return 0
     
-    
     async def get_notificacao_stats(self) -> Dict:
-        """
-        Retorna estatisticas sobre notificacoes.
-        
-        Returns:
-            Dicionario com estatisticas (total, nao_vistas, vistas, hoje, esta_semana)
-        """
         try:
-            # Total de notificacoes
             total_response = self.supabase.table("notificacoes").select("id", count="exact").execute()
             total = total_response.count if total_response.count else 0
             
-            # Nao vistas
             nao_vistas_response = self.supabase.table("notificacoes").select("id", count="exact").eq("vista", False).execute()
             nao_vistas = nao_vistas_response.count if nao_vistas_response.count else 0
             
-            # Vistas
             vistas = total - nao_vistas
             
-            # Hoje
             hoje = datetime.now(timezone.utc).date().isoformat()
             hoje_response = self.supabase.table("notificacoes").select("id", count="exact").gte("data_disparo", hoje).execute()
             hoje_count = hoje_response.count if hoje_response.count else 0
             
-            # Esta semana
             semana_atras = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
             semana_response = self.supabase.table("notificacoes").select("id", count="exact").gte("data_disparo", semana_atras).execute()
             semana_count = semana_response.count if semana_response.count else 0
@@ -697,18 +635,7 @@ class SupabaseClient:
                 "esta_semana": 0
             }
     
-    
-    # ========================================
-    # METODOS PARA REGRAS DE NOTIFICACOES
-    # ========================================
-    
     async def get_regras_notificacoes(self) -> List[Dict]:
-        """
-        Busca todas as regras de notificacoes.
-        
-        Returns:
-            Lista de regras
-        """
         try:
             response = self.supabase.table("regras_notificacoes").select("*").order("views_minimas", desc=False).execute()
             return response.data if response.data else []
@@ -716,17 +643,7 @@ class SupabaseClient:
             logger.error(f"Erro ao buscar regras de notificacoes: {e}")
             return []
     
-    
     async def create_regra_notificacao(self, regra_data: Dict) -> Optional[Dict]:
-        """
-        Cria uma nova regra de notificacao.
-        
-        Args:
-            regra_data: Dicionario com dados da regra (nome_regra, views_minimas, periodo_dias, tipo_canal, ativa)
-        
-        Returns:
-            Dados da regra criada ou None se erro
-        """
         try:
             response = self.supabase.table("regras_notificacoes").insert(regra_data).execute()
             return response.data[0] if response.data else None
@@ -734,18 +651,7 @@ class SupabaseClient:
             logger.error(f"Erro ao criar regra de notificacao: {e}")
             return None
     
-    
     async def update_regra_notificacao(self, regra_id: int, regra_data: Dict) -> Optional[Dict]:
-        """
-        Atualiza uma regra de notificacao existente.
-        
-        Args:
-            regra_id: ID da regra
-            regra_data: Dicionario com dados atualizados
-        
-        Returns:
-            Dados da regra atualizada ou None se erro
-        """
         try:
             response = self.supabase.table("regras_notificacoes").update(regra_data).eq("id", regra_id).execute()
             return response.data[0] if response.data else None
@@ -753,17 +659,7 @@ class SupabaseClient:
             logger.error(f"Erro ao atualizar regra de notificacao: {e}")
             return None
     
-    
     async def delete_regra_notificacao(self, regra_id: int) -> bool:
-        """
-        Deleta uma regra de notificacao.
-        
-        Args:
-            regra_id: ID da regra
-        
-        Returns:
-            True se sucesso, False se erro
-        """
         try:
             response = self.supabase.table("regras_notificacoes").delete().eq("id", regra_id).execute()
             return True
@@ -771,28 +667,15 @@ class SupabaseClient:
             logger.error(f"Erro ao deletar regra de notificacao: {e}")
             return False
     
-    
     async def toggle_regra_notificacao(self, regra_id: int) -> Optional[Dict]:
-        """
-        Ativa/desativa uma regra de notificacao (toggle).
-        
-        Args:
-            regra_id: ID da regra
-        
-        Returns:
-            Dados da regra atualizada ou None se erro
-        """
         try:
-            # Buscar estado atual
             current = self.supabase.table("regras_notificacoes").select("ativa").eq("id", regra_id).execute()
             
             if not current.data:
                 return None
             
-            # Inverter estado
             nova_ativa = not current.data[0]["ativa"]
             
-            # Atualizar
             response = self.supabase.table("regras_notificacoes").update({
                 "ativa": nova_ativa
             }).eq("id", regra_id).execute()
@@ -800,4 +683,36 @@ class SupabaseClient:
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"Erro ao toggle regra de notificacao: {e}")
+            return None
+
+    async def get_cached_transcription(self, video_id: str):
+        """Busca transcrição no cache"""
+        try:
+            response = self.supabase.table("transcriptions").select("*").eq("video_id", video_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Cache hit for video: {video_id}")
+                return response.data[0]["transcription"]
+            
+            logger.info(f"❌ Cache miss for video: {video_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching cached transcription: {e}")
+            return None
+    
+    async def save_transcription_cache(self, video_id: str, transcription: str):
+        """Salva transcrição no cache"""
+        try:
+            data = {
+                "video_id": video_id,
+                "transcription": transcription,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = self.supabase.table("transcriptions").upsert(data).execute()
+            
+            logger.info(f"💾 Transcription cached for video: {video_id}")
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error saving transcription cache: {e}")
             return None

@@ -639,12 +639,11 @@ async def transcribe_video(video_id: str):
         video_binary = base64.b64decode(download_data['data'])
         
         files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
-        data = {'language': ''}  # Auto-detect
+        # Não enviamos language para auto-detect
         
         transcription_response = requests.post(
             "http://187.94.111.238:6127/transcribe",
             files=files,
-            data=data,
             timeout=300
         )
         

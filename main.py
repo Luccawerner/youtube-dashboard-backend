@@ -642,7 +642,7 @@ async def transcribe_video(video_id: str):
         # Não enviamos language para auto-detect
         
         transcription_response = requests.post(
-            "http://187.94.111.238:6127/transcribe",
+            "https://whisperx-dash.2growai.com.br/transcribe",
             files=files,
             timeout=300
         )

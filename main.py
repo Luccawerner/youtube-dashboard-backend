@@ -624,7 +624,7 @@ async def transcribe_video(video_id: str):
         download_response = requests.post(
             "https://download.2growai.com.br",
             json={"video_url": video_url},
-            timeout=120
+            timeout=600  # ✅ MUDANÇA 1: 120s → 600s (10 minutos)
         )
         
         if download_response.status_code != 200:
@@ -644,7 +644,7 @@ async def transcribe_video(video_id: str):
         transcription_response = requests.post(
             "https://whisperx-dash.2growai.com.br/transcribe",
             files=files,
-            timeout=300
+            timeout=1800  # ✅ MUDANÇA 2: 300s → 1800s (30 minutos)
         )
         
         if transcription_response.status_code != 200:

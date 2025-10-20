@@ -644,17 +644,41 @@ class SupabaseClient:
             return []
     
     async def create_regra_notificacao(self, regra_data: Dict) -> Optional[Dict]:
+        """Cria nova regra de notificação - SUPORTA MÚLTIPLOS SUBNICHOS"""
         try:
+            # 🆕 Converter subnichos para formato correto
+            if 'subnichos' in regra_data:
+                if regra_data['subnichos'] is None or (isinstance(regra_data['subnichos'], list) and len(regra_data['subnichos']) == 0):
+                    regra_data['subnichos'] = None
+                elif isinstance(regra_data['subnichos'], str):
+                    regra_data['subnichos'] = [regra_data['subnichos']]
+            
             response = self.supabase.table("regras_notificacoes").insert(regra_data).execute()
-            return response.data[0] if response.data else None
+            
+            if response.data:
+                logger.info(f"✅ Regra criada: {regra_data.get('nome_regra')} com {len(regra_data.get('subnichos', [])) if regra_data.get('subnichos') else 'todos os'} subnicho(s)")
+                return response.data[0]
+            return None
         except Exception as e:
             logger.error(f"Erro ao criar regra de notificacao: {e}")
             return None
     
     async def update_regra_notificacao(self, regra_id: int, regra_data: Dict) -> Optional[Dict]:
+        """Atualiza regra de notificação existente - SUPORTA MÚLTIPLOS SUBNICHOS"""
         try:
+            # 🆕 Converter subnichos para formato correto
+            if 'subnichos' in regra_data:
+                if regra_data['subnichos'] is None or (isinstance(regra_data['subnichos'], list) and len(regra_data['subnichos']) == 0):
+                    regra_data['subnichos'] = None
+                elif isinstance(regra_data['subnichos'], str):
+                    regra_data['subnichos'] = [regra_data['subnichos']]
+            
             response = self.supabase.table("regras_notificacoes").update(regra_data).eq("id", regra_id).execute()
-            return response.data[0] if response.data else None
+            
+            if response.data:
+                logger.info(f"✅ Regra atualizada: ID {regra_id}")
+                return response.data[0]
+            return None
         except Exception as e:
             logger.error(f"Erro ao atualizar regra de notificacao: {e}")
             return None

@@ -36,7 +36,7 @@ collection_in_progress = False
 last_collection_time = None
 
 # ========================================
-# 🆕 SISTEMA DE JOBS ASSÍNCRONOS
+# SISTEMA DE JOBS ASSÍNCRONOS
 # ========================================
 
 transcription_jobs: Dict[str, Dict[str, Any]] = {}
@@ -133,7 +133,7 @@ def process_transcription_job(job_id: str, video_id: str):
             transcription_jobs[job_id]['failed_at'] = datetime.now(timezone.utc)
 
 # ========================================
-# 🆕 ENDPOINTS DE TRANSCRIÇÃO ASSÍNCRONA
+# ENDPOINTS DE TRANSCRIÇÃO ASSÍNCRONA
 # ========================================
 
 @app.post("/api/transcribe")
@@ -518,11 +518,9 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         quota_disponivel = quota_total - quota_usada
         porcentagem_usada = (quota_usada / quota_total) * 100 if quota_total > 0 else 0
         
-        # 🆕 DADOS DETALHADOS DAS CHAVES
         now_utc = datetime.now(timezone.utc)
         next_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         
-        # Converter para horário de Brasília (UTC-3)
         brasilia_offset = timedelta(hours=-3)
         next_reset_brasilia = next_reset + brasilia_offset
         
@@ -741,6 +739,7 @@ async def create_regra_notificacao(
     views_minimas: int,
     periodo_dias: int,
     tipo_canal: str = "ambos",
+    subnichos: Optional[List[str]] = None,  # 🆕 Array de strings
     ativa: bool = True
 ):
     try:
@@ -749,6 +748,7 @@ async def create_regra_notificacao(
             "views_minimas": views_minimas,
             "periodo_dias": periodo_dias,
             "tipo_canal": tipo_canal,
+            "subnichos": subnichos,  # 🆕 Pode ser None ou lista
             "ativa": ativa
         }
         
@@ -772,6 +772,7 @@ async def update_regra_notificacao(
     views_minimas: int,
     periodo_dias: int,
     tipo_canal: str = "ambos",
+    subnichos: Optional[List[str]] = None,  # 🆕 Array de strings
     ativa: bool = True
 ):
     try:
@@ -780,6 +781,7 @@ async def update_regra_notificacao(
             "views_minimas": views_minimas,
             "periodo_dias": periodo_dias,
             "tipo_canal": tipo_canal,
+            "subnichos": subnichos,  # 🆕 Pode ser None ou lista
             "ativa": ativa
         }
         

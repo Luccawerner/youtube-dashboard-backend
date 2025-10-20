@@ -3,6 +3,7 @@ import re
 import asyncio
 import logging
 import html
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Set
 from collections import deque
@@ -11,7 +12,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# 🆕 FUNÇÃO PARA DECODIFICAR HTML ENTITIES
+# FUNÇÃO PARA DECODIFICAR HTML ENTITIES
 def decode_html_entities(text: str) -> str:
     """Decodifica HTML entities em texto (ex: &#39; -> ')"""
     if not text:
@@ -53,7 +54,6 @@ class RateLimiter:
         if len(self.requests) < self.max_requests:
             return 0.0
         
-        # Precisa aguardar até a requisição mais antiga sair da janela
         oldest = self.requests[0]
         now = datetime.now(timezone.utc)
         wait = (oldest + timedelta(seconds=self.time_window)) - now
@@ -69,7 +69,7 @@ class RateLimiter:
         wait_time = self.get_wait_time()
         if wait_time > 0:
             logger.info(f"⏳ Rate limit próximo - aguardando {wait_time:.1f}s")
-            await asyncio.sleep(wait_time + 0.5)  # +0.5s margem extra
+            await asyncio.sleep(wait_time + 0.5)
     
     def get_stats(self) -> Dict:
         """Retorna estatísticas do rate limiter"""
@@ -83,7 +83,7 @@ class RateLimiter:
 
 class YouTubeCollector:
     def __init__(self):
-        # Busca todas as chaves de API (KEY_1 até KEY_10)
+        # Busca todas as chaves de API
         self.api_keys = [
             os.environ.get("YOUTUBE_API_KEY_1"),
             os.environ.get("YOUTUBE_API_KEY_2"),
@@ -97,18 +97,16 @@ class YouTubeCollector:
             os.environ.get("YOUTUBE_API_KEY_10")
         ]
         
-        # Filtra apenas chaves que existem
         self.api_keys = [key for key in self.api_keys if key]
         
         if not self.api_keys:
             raise ValueError("At least one YouTube API key is required")
         
-        # Um RateLimiter para CADA chave
         self.rate_limiters = {i: RateLimiter() for i in range(len(self.api_keys))}
         
         self.current_key_index = 0
         self.exhausted_keys = set()
-        self.last_reset_date = datetime.now(timezone.utc).date()  # 🆕 Rastrear último reset
+        self.last_reset_date = datetime.now(timezone.utc).date()
         self.base_url = "https://www.googleapis.com/youtube/v3"
         
         # REQUEST COUNTER
@@ -119,27 +117,22 @@ class YouTubeCollector:
         
         # RETRY CONFIG
         self.max_retries = 3
-        self.base_delay = 0.8  # Delay base entre requisições
+        self.base_delay = 0.8
         
         logger.info(f"🚀 YouTube collector initialized with {len(self.api_keys)} API keys")
         logger.info(f"📊 Rate limiter: {self.rate_limiters[0].max_requests} req/{self.rate_limiters[0].time_window}s per key")
 
     def reset_for_new_collection(self):
-        """
-        Reset collector state - RESETA exhausted_keys se passou da meia-noite UTC
-        Google reseta quota à meia-noite UTC, então devemos resetar nossa flag também
-        """
+        """Reset collector state"""
         self.failed_canals = set()
         self.total_requests = 0
         self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal = {}
         
-        # 🆕 RESETAR CHAVES ESGOTADAS A CADA NOVA COLETA
-        # Pois quota do Google já resetou à meia-noite UTC
         if self.exhausted_keys:
             logger.info("=" * 80)
             logger.info(f"🔄 RESETANDO {len(self.exhausted_keys)} CHAVES MARCADAS COMO ESGOTADAS")
-            logger.info("✅ Quota do Google resetou à meia-noite UTC - todas chaves disponíveis novamente")
+            logger.info("✅ Quota do Google resetou à meia-noite UTC")
             logger.info("=" * 80)
             self.exhausted_keys.clear()
         
@@ -169,11 +162,10 @@ class YouTubeCollector:
         }
 
     def get_current_api_key(self) -> Optional[str]:
-        """Get current API key - PULA chaves esgotadas"""
+        """Get current API key"""
         if self.all_keys_exhausted():
             return None
         
-        # Pula chaves esgotadas
         attempts = 0
         while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
             self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
@@ -185,11 +177,10 @@ class YouTubeCollector:
         return self.api_keys[self.current_key_index]
 
     def rotate_to_next_key(self):
-        """Rotaciona para próxima chave disponível (round-robin)"""
+        """Rotaciona para próxima chave disponível"""
         old_index = self.current_key_index
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         
-        # Pula chaves esgotadas
         attempts = 0
         while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
             self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
@@ -218,10 +209,7 @@ class YouTubeCollector:
         return canal_url in self.failed_canals
 
     async def make_api_request(self, url: str, params: dict, canal_name: str = "system", retry_count: int = 0) -> Optional[dict]:
-        """
-        Função para fazer requisições à API do YouTube
-        Gerencia rate limiting, retries, e diferenciação de erros
-        """
+        """Função para fazer requisições à API do YouTube"""
         if self.all_keys_exhausted():
             logger.error("❌ All keys exhausted!")
             return None
@@ -232,27 +220,22 @@ class YouTubeCollector:
         
         params['key'] = current_key
         
-        # AGUARDA RATE LIMITER
         await self.rate_limiters[self.current_key_index].wait_if_needed()
         
         try:
             async with aiohttp.ClientSession() as session:
-                # Incrementa contadores ANTES da requisição
                 self.increment_request_counter(canal_name)
                 self.rate_limiters[self.current_key_index].record_request()
                 
-                # Delay base
                 if self.total_requests > 0:
                     await asyncio.sleep(self.base_delay)
                 
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     
-                    # ✅ SUCESSO
                     if response.status == 200:
                         data = await response.json()
                         return data
                     
-                    # ⚠️ ERRO 403 - TRATAMENTO MELHORADO
                     elif response.status == 403:
                         error_data = await response.json()
                         error_obj = error_data.get('error', {})
@@ -261,24 +244,20 @@ class YouTubeCollector:
                         if error_obj.get('errors'):
                             error_reason = error_obj['errors'][0].get('reason', '').lower()
                         
-                        # Log detalhado do erro
                         logger.warning(f"⚠️ 403 Error - Message: '{error_msg}' | Reason: '{error_reason}'")
                         
-                        # 🔴 QUOTA EXCEEDED (diária esgotada) - MARCA COMO MORTA
                         if 'quota' in error_msg or 'quota' in error_reason or 'dailylimit' in error_reason:
                             logger.error(f"🚨 QUOTA EXCEEDED on key {self.current_key_index + 1}")
                             self.mark_key_as_exhausted()
                             
-                            # Tenta com próxima chave
                             if retry_count < self.max_retries and not self.all_keys_exhausted():
                                 logger.info(f"♻️ Tentando com próxima chave disponível...")
                                 return await self.make_api_request(url, params, canal_name, retry_count + 1)
                             return None
                         
-                        # 🟡 RATE LIMIT (temporário) - AGUARDA E TENTA DE NOVO
                         elif 'ratelimit' in error_msg or 'ratelimit' in error_reason or 'usageratelimit' in error_reason:
                             if retry_count < self.max_retries:
-                                wait_time = (2 ** retry_count) * 30  # 30s, 60s, 120s
+                                wait_time = (2 ** retry_count) * 30
                                 logger.warning(f"⏱️ RATE LIMIT hit on key {self.current_key_index + 1}")
                                 logger.info(f"♻️ Retry {retry_count + 1}/{self.max_retries} após {wait_time}s")
                                 await asyncio.sleep(wait_time)
@@ -287,22 +266,18 @@ class YouTubeCollector:
                                 logger.error(f"❌ Max retries atingido após rate limit")
                                 return None
                         
-                        # 🟠 403 GENÉRICO (sem especificar) - AGUARDA E TENTA DE NOVO
                         else:
-                            logger.warning(f"⚠️ 403 genérico (não quota/rate): {error_msg}")
+                            logger.warning(f"⚠️ 403 genérico: {error_msg}")
                             
-                            # NÃO MARCA COMO EXHAUSTED! Tenta de novo com backoff
                             if retry_count < self.max_retries:
-                                wait_time = (2 ** retry_count) * 15  # 15s, 30s, 60s
+                                wait_time = (2 ** retry_count) * 15
                                 logger.info(f"♻️ Tentando novamente após {wait_time}s (retry {retry_count + 1}/{self.max_retries})")
                                 await asyncio.sleep(wait_time)
                                 return await self.make_api_request(url, params, canal_name, retry_count + 1)
                             else:
-                                # Só depois de 3 tentativas falhas, ENTÃO considera problema
-                                logger.warning(f"⚠️ 403 persistente após {self.max_retries} tentativas - pulando requisição")
+                                logger.warning(f"⚠️ 403 persistente após {self.max_retries} tentativas")
                                 return None
                     
-                    # ⚠️ OUTROS ERROS HTTP
                     else:
                         logger.warning(f"⚠️ HTTP {response.status}: {await response.text()}")
                         return None
@@ -330,25 +305,32 @@ class YouTubeCollector:
         return channel_id.startswith('UC') and len(channel_id) == 24
 
     def extract_channel_identifier(self, url: str) -> tuple[Optional[str], str]:
-        """Extract channel identifier from YouTube URL"""
+        """Extract channel identifier from YouTube URL - SUPORTA CARACTERES UNICODE"""
         url = self.clean_youtube_url(url)
         
+        # 1. Channel ID direto (mais confiável)
         channel_id_match = re.search(r'youtube\.com/channel/([a-zA-Z0-9_-]+)', url)
         if channel_id_match:
             channel_id = channel_id_match.group(1)
             if self.is_valid_channel_id(channel_id):
                 return (channel_id, 'id')
         
-        handle_match = re.search(r'youtube\.com/@([a-zA-Z0-9._-]+)', url)
+        # 2. Handle (@...) - ACEITA QUALQUER CARACTERE
+        handle_match = re.search(r'youtube\.com/@([^/?&#]+)', url)
         if handle_match:
             handle = handle_match.group(1)
+            # Decodifica URL encoding (%C4%B1 etc)
+            handle = urllib.parse.unquote(handle)
+            logger.debug(f"Handle extraído: {handle}")
             return (handle, 'handle')
         
+        # 3. Custom URL (/c/)
         custom_match = re.search(r'youtube\.com/c/([a-zA-Z0-9._-]+)', url)
         if custom_match:
             username = custom_match.group(1)
             return (username, 'username')
         
+        # 4. Old style (/user/)
         user_match = re.search(r'youtube\.com/user/([a-zA-Z0-9._-]+)', url)
         if user_match:
             username = user_match.group(1)
@@ -364,20 +346,27 @@ class YouTubeCollector:
         if handle.startswith('@'):
             handle = handle[1:]
         
+        logger.info(f"🔍 {canal_name}: Buscando channel ID para handle '{handle}'")
+        
         # Try forHandle
         url = f"{self.base_url}/channels"
         params = {'part': 'id', 'forHandle': handle}
         
         data = await self.make_api_request(url, params, canal_name)
         if data and data.get('items'):
-            return data['items'][0]['id']
+            channel_id = data['items'][0]['id']
+            logger.info(f"✅ {canal_name}: Channel ID encontrado via forHandle: {channel_id}")
+            return channel_id
         
         # Try forUsername
         params = {'part': 'id', 'forUsername': handle}
         data = await self.make_api_request(url, params, canal_name)
         if data and data.get('items'):
-            return data['items'][0]['id']
+            channel_id = data['items'][0]['id']
+            logger.info(f"✅ {canal_name}: Channel ID encontrado via forUsername: {channel_id}")
+            return channel_id
         
+        logger.warning(f"❌ {canal_name}: Não foi possível encontrar channel ID para handle '{handle}'")
         return None
 
     async def get_channel_id(self, url: str, canal_name: str) -> Optional[str]:
@@ -385,6 +374,7 @@ class YouTubeCollector:
         identifier, id_type = self.extract_channel_identifier(url)
         
         if not identifier:
+            logger.error(f"❌ {canal_name}: Não foi possível extrair identificador da URL: {url}")
             return None
         
         if id_type == 'id' and self.is_valid_channel_id(identifier):
@@ -423,17 +413,22 @@ class YouTubeCollector:
     async def get_channel_videos(self, channel_id: str, canal_name: str, days: int = 60) -> List[Dict[str, Any]]:
         """Get channel videos"""
         if not self.is_valid_channel_id(channel_id):
+            logger.warning(f"❌ {canal_name}: Invalid channel ID")
             return []
         
         if self.all_keys_exhausted():
+            logger.warning(f"❌ {canal_name}: All keys exhausted")
             return []
         
         videos = []
         page_token = None
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         
+        logger.info(f"🔍 {canal_name}: Buscando vídeos desde {cutoff_date.date()}")
+        
         while True:
             if self.all_keys_exhausted():
+                logger.warning(f"⚠️ {canal_name}: Keys exhausted during video fetch")
                 break
             
             url = f"{self.base_url}/search"
@@ -451,7 +446,12 @@ class YouTubeCollector:
             
             data = await self.make_api_request(url, params, canal_name)
             
-            if not data or not data.get('items'):
+            if not data:
+                logger.warning(f"⚠️ {canal_name}: API request returned None")
+                break
+                
+            if not data.get('items'):
+                logger.info(f"ℹ️ {canal_name}: No more videos found")
                 break
             
             video_ids = [item['id']['videoId'] for item in data['items']]
@@ -475,6 +475,7 @@ class YouTubeCollector:
             if not page_token:
                 break
         
+        logger.info(f"✅ {canal_name}: Encontrados {len(videos)} vídeos nos últimos {days} dias")
         return videos
 
     async def get_video_details(self, video_ids: List[str], canal_name: str) -> List[Optional[Dict[str, Any]]]:
@@ -536,29 +537,41 @@ class YouTubeCollector:
         return 0
 
     def calculate_views_by_period(self, videos: List[Dict], current_date: datetime) -> Dict[str, int]:
-        """Calculate views for different periods"""
+        """Calculate views for different periods - USA TOTAL_SECONDS PARA PRECISÃO"""
         views_60d = views_30d = views_15d = views_7d = 0
         
         if current_date.tzinfo is None:
             current_date = current_date.replace(tzinfo=timezone.utc)
+        
+        count_60d = count_30d = count_15d = count_7d = 0
         
         for video in videos:
             try:
                 pub_date_str = video['data_publicacao']
                 pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
                 
-                days_ago = (current_date - pub_date).days
+                # Usar total_seconds() para precisão
+                time_diff = current_date - pub_date
+                days_ago = time_diff.total_seconds() / 86400
                 
                 if days_ago <= 60:
                     views_60d += video['views_atuais']
+                    count_60d += 1
                 if days_ago <= 30:
                     views_30d += video['views_atuais']
+                    count_30d += 1
                 if days_ago <= 15:
                     views_15d += video['views_atuais']
+                    count_15d += 1
                 if days_ago <= 7:
                     views_7d += video['views_atuais']
+                    count_7d += 1
+                    
             except Exception as e:
+                logger.warning(f"⚠️ Erro ao calcular views: {e}")
                 continue
+        
+        logger.debug(f"📊 Views: 7d={views_7d} ({count_7d} vídeos), 30d={views_30d} ({count_30d} vídeos)")
         
         return {
             'views_60d': views_60d,
@@ -575,28 +588,39 @@ class YouTubeCollector:
                 return None
             
             if self.all_keys_exhausted():
+                logger.error(f"❌ {canal_name}: All keys exhausted")
                 return None
             
-            # Rotaciona para próxima chave antes de começar (round-robin)
+            logger.info(f"🎬 Iniciando coleta: {canal_name}")
+            
             self.rotate_to_next_key()
             
             channel_id = await self.get_channel_id(url_canal, canal_name)
             
             if not channel_id:
+                logger.error(f"❌ {canal_name}: Não foi possível obter channel_id")
                 self.mark_canal_as_failed(url_canal)
                 return None
+            
+            logger.info(f"✅ {canal_name}: Channel ID = {channel_id}")
             
             channel_info = await self.get_channel_info(channel_id, canal_name)
             if not channel_info:
+                logger.error(f"❌ {canal_name}: Não foi possível obter info do canal")
                 self.mark_canal_as_failed(url_canal)
                 return None
             
+            logger.info(f"✅ {canal_name}: {channel_info['subscriber_count']:,} inscritos")
+            
             videos = await self.get_channel_videos(channel_id, canal_name, days=60)
+            
+            if not videos:
+                logger.warning(f"⚠️ {canal_name}: NENHUM vídeo encontrado nos últimos 60 dias!")
             
             current_date = datetime.now(timezone.utc)
             views_by_period = self.calculate_views_by_period(videos, current_date)
             
-            videos_7d = sum(1 for v in videos if (current_date - datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))).days <= 7)
+            videos_7d = sum(1 for v in videos if (current_date - datetime.fromisoformat(v['data_publicacao'].replace('Z', '+00:00'))).total_seconds() / 86400 <= 7)
             
             total_engagement = sum(v['likes'] + v['comentarios'] for v in videos)
             total_views = sum(v['views_atuais'] for v in videos)
@@ -608,6 +632,8 @@ class YouTubeCollector:
                 'engagement_rate': round(engagement_rate, 2),
                 **views_by_period
             }
+            
+            logger.info(f"✅ {canal_name}: Coleta concluída - 7d={views_by_period['views_7d']:,} views")
             
             return result
         

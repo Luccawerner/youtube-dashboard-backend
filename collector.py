@@ -105,8 +105,10 @@ class YouTubeCollector:
         self.rate_limiters = {i: RateLimiter() for i in range(len(self.api_keys))}
         
         self.current_key_index = 0
-        self.exhausted_keys = set()
-        self.last_reset_date = datetime.now(timezone.utc).date()
+        
+        # 🆕 RASTREAR DIA UTC QUE CADA CHAVE FOI ESGOTADA
+        self.exhausted_keys_date: Dict[int, datetime.date] = {}
+        
         self.base_url = "https://www.googleapis.com/youtube/v3"
         
         # REQUEST COUNTER
@@ -123,23 +125,40 @@ class YouTubeCollector:
         logger.info(f"📊 Rate limiter: {self.rate_limiters[0].max_requests} req/{self.rate_limiters[0].time_window}s per key")
 
     def reset_for_new_collection(self):
-        """Reset collector state"""
+        """Reset collector state - LIMPA CHAVES SE JÁ MUDOU DE DIA UTC"""
         self.failed_canals = set()
         self.total_requests = 0
         self.requests_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.requests_per_canal = {}
         
-        if self.exhausted_keys:
-            logger.info("=" * 80)
-            logger.info(f"🔄 RESETANDO {len(self.exhausted_keys)} CHAVES MARCADAS COMO ESGOTADAS")
-            logger.info("✅ Quota do Google resetou à meia-noite UTC")
-            logger.info("=" * 80)
-            self.exhausted_keys.clear()
+        # 🆕 LIMPAR CHAVES ESGOTADAS SE JÁ É OUTRO DIA UTC
+        today_utc = datetime.now(timezone.utc).date()
         
+        keys_to_reset = []
+        for key_index, exhausted_date in list(self.exhausted_keys_date.items()):
+            if exhausted_date < today_utc:
+                keys_to_reset.append(key_index)
+        
+        if keys_to_reset:
+            logger.info("=" * 80)
+            logger.info(f"🔄 RESETANDO {len(keys_to_reset)} CHAVES (novo dia UTC)")
+            for key_index in keys_to_reset:
+                del self.exhausted_keys_date[key_index]
+                logger.info(f"✅ Key {key_index + 1} disponível novamente")
+            logger.info("=" * 80)
+        
+        # Log status das chaves
         logger.info("=" * 80)
         logger.info("🔄 COLLECTOR RESET")
-        logger.info(f"🔑 Chaves disponíveis: {len(self.api_keys) - len(self.exhausted_keys)}/{len(self.api_keys)}")
-        logger.info(f"📊 Chave atual: {self.current_key_index + 1}")
+        logger.info(f"📅 Dia UTC atual: {today_utc}")
+        logger.info(f"🔑 Chaves disponíveis: {len(self.api_keys) - len(self.exhausted_keys_date)}/{len(self.api_keys)}")
+        
+        if self.exhausted_keys_date:
+            logger.warning(f"⚠️  Chaves esgotadas hoje:")
+            for key_idx, date in self.exhausted_keys_date.items():
+                logger.warning(f"   Key {key_idx + 1}: esgotada em {date}")
+        
+        logger.info(f"📊 Chave inicial: {self.current_key_index + 1}")
         logger.info("=" * 80)
 
     def increment_request_counter(self, canal_name: str = "system"):
@@ -157,17 +176,17 @@ class YouTubeCollector:
             "requests_per_key": self.requests_per_key.copy(),
             "requests_per_canal": self.requests_per_canal.copy(),
             "failed_canals": list(self.failed_canals),
-            "exhausted_keys": len(self.exhausted_keys),
-            "active_keys": len(self.api_keys) - len(self.exhausted_keys)
+            "exhausted_keys": len(self.exhausted_keys_date),
+            "active_keys": len(self.api_keys) - len(self.exhausted_keys_date)
         }
 
     def get_current_api_key(self) -> Optional[str]:
-        """Get current API key"""
+        """Get current API key - PULA chaves esgotadas HOJE"""
         if self.all_keys_exhausted():
             return None
         
         attempts = 0
-        while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
+        while self.current_key_index in self.exhausted_keys_date and attempts < len(self.api_keys):
             self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
             attempts += 1
         
@@ -182,7 +201,7 @@ class YouTubeCollector:
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         
         attempts = 0
-        while self.current_key_index in self.exhausted_keys and attempts < len(self.api_keys):
+        while self.current_key_index in self.exhausted_keys_date and attempts < len(self.api_keys):
             self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
             attempts += 1
         
@@ -191,14 +210,18 @@ class YouTubeCollector:
             logger.info(f"🔄 Rotated: Key {old_index + 1} → Key {self.current_key_index + 1} (load: {stats['requests_in_window']}/{stats['max_requests']})")
 
     def mark_key_as_exhausted(self):
-        """Marca chave atual como esgotada"""
-        self.exhausted_keys.add(self.current_key_index)
-        logger.error(f"🚨 Key {self.current_key_index + 1} EXHAUSTED (quota esgotada)")
+        """Marca chave atual como esgotada ATÉ MEIA-NOITE UTC"""
+        today_utc = datetime.now(timezone.utc).date()
+        self.exhausted_keys_date[self.current_key_index] = today_utc
+        
+        logger.error(f"🚨 Key {self.current_key_index + 1} EXHAUSTED até meia-noite UTC ({today_utc})")
+        logger.error(f"🔑 Chaves restantes: {len(self.api_keys) - len(self.exhausted_keys_date)}/{len(self.api_keys)}")
+        
         self.rotate_to_next_key()
     
     def all_keys_exhausted(self) -> bool:
-        """Check if all API keys are exhausted"""
-        return len(self.exhausted_keys) >= len(self.api_keys)
+        """Check if all API keys are exhausted HOJE"""
+        return len(self.exhausted_keys_date) >= len(self.api_keys)
 
     def mark_canal_as_failed(self, canal_url: str):
         """Mark a canal as failed"""

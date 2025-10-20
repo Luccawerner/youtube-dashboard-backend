@@ -4,9 +4,12 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import asyncio
 import logging
+import uuid
+import threading
+import time
 
 from database import SupabaseClient
 from collector import YouTubeCollector
@@ -32,6 +35,259 @@ notifier = NotificationChecker(db.supabase)
 collection_in_progress = False
 last_collection_time = None
 
+# ========================================
+# 🆕 SISTEMA DE JOBS ASSÍNCRONOS
+# ========================================
+
+# Armazena jobs de transcrição em memória
+transcription_jobs: Dict[str, Dict[str, Any]] = {}
+
+# Lock para acesso thread-safe ao dicionário
+jobs_lock = threading.Lock()
+
+def cleanup_old_jobs():
+    """Remove jobs com mais de 1 hora"""
+    with jobs_lock:
+        now = datetime.now(timezone.utc)
+        old_jobs = [
+            job_id for job_id, job in transcription_jobs.items()
+            if (now - job['created_at']).total_seconds() > 3600
+        ]
+        for job_id in old_jobs:
+            logger.info(f"🧹 Removendo job antigo: {job_id}")
+            del transcription_jobs[job_id]
+
+def process_transcription_job(job_id: str, video_id: str):
+    """
+    Processa transcrição em background thread.
+    Sem timeouts - pode levar quanto tempo for necessário.
+    """
+    try:
+        logger.info(f"🎬 [JOB {job_id}] Iniciando transcrição: {video_id}")
+        
+        # Atualizar status: downloading
+        with jobs_lock:
+            transcription_jobs[job_id]['status'] = 'downloading'
+            transcription_jobs[job_id]['message'] = 'Baixando vídeo...'
+        
+        # 1. BAIXAR VÍDEO
+        import requests
+        import base64
+        
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info(f"⬇️ [JOB {job_id}] Baixando: {video_url}")
+        
+        download_response = requests.post(
+            "https://download.2growai.com.br",
+            json={"video_url": video_url},
+            timeout=300  # 5 minutos para download
+        )
+        
+        if download_response.status_code != 200:
+            raise Exception("Falha no download do vídeo")
+        
+        download_data = download_response.json()
+        video_binary = base64.b64decode(download_data['data'])
+        
+        logger.info(f"✅ [JOB {job_id}] Download completo: {len(video_binary)} bytes")
+        
+        # Atualizar status: transcribing
+        with jobs_lock:
+            transcription_jobs[job_id]['status'] = 'transcribing'
+            transcription_jobs[job_id]['message'] = 'Transcrevendo áudio...'
+        
+        # 2. TRANSCREVER COM WHISPERX
+        logger.info(f"🎤 [JOB {job_id}] Iniciando transcrição...")
+        
+        files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
+        
+        transcription_response = requests.post(
+            "https://whisperx-dash.2growai.com.br/transcribe",
+            files=files,
+            timeout=600  # 10 minutos para transcrição
+        )
+        
+        if transcription_response.status_code != 200:
+            raise Exception("Falha na transcrição do vídeo")
+        
+        transcription_data = transcription_response.json()
+        
+        # 3. FORMATAR TEXTO
+        clean_text = " ".join([
+            segment['text'].strip() 
+            for segment in transcription_data.get('segments', [])
+        ])
+        
+        logger.info(f"📝 [JOB {job_id}] Transcrição completa: {len(clean_text)} caracteres")
+        
+        # 4. SALVAR NO CACHE
+        asyncio.run(db.save_transcription_cache(video_id, clean_text))
+        
+        # 5. ATUALIZAR STATUS: COMPLETED
+        with jobs_lock:
+            transcription_jobs[job_id]['status'] = 'completed'
+            transcription_jobs[job_id]['message'] = 'Transcrição concluída'
+            transcription_jobs[job_id]['result'] = {
+                'transcription': clean_text,
+                'segments_count': len(transcription_data.get('segments', [])),
+                'video_id': video_id
+            }
+            transcription_jobs[job_id]['completed_at'] = datetime.now(timezone.utc)
+        
+        logger.info(f"✅ [JOB {job_id}] SUCESSO")
+        
+    except Exception as e:
+        logger.error(f"❌ [JOB {job_id}] ERRO: {e}")
+        
+        # Atualizar status: failed
+        with jobs_lock:
+            transcription_jobs[job_id]['status'] = 'failed'
+            transcription_jobs[job_id]['message'] = str(e)
+            transcription_jobs[job_id]['error'] = str(e)
+            transcription_jobs[job_id]['failed_at'] = datetime.now(timezone.utc)
+
+# ========================================
+# 🆕 ENDPOINTS DE TRANSCRIÇÃO ASSÍNCRONA
+# ========================================
+
+@app.post("/api/transcribe")
+async def transcribe_video_async(video_id: str):
+    """
+    Inicia transcrição assíncrona.
+    Retorna job_id IMEDIATAMENTE para polling.
+    """
+    try:
+        logger.info(f"🎬 Nova requisição de transcrição: {video_id}")
+        
+        # Limpar jobs antigos
+        cleanup_old_jobs()
+        
+        # 1. VERIFICAR CACHE PRIMEIRO
+        cached = await db.get_cached_transcription(video_id)
+        if cached:
+            logger.info(f"✅ Cache hit para: {video_id}")
+            return {
+                "status": "completed",
+                "from_cache": True,
+                "result": {
+                    "transcription": cached,
+                    "video_id": video_id
+                }
+            }
+        
+        # 2. CRIAR JOB
+        job_id = str(uuid.uuid4())
+        
+        with jobs_lock:
+            transcription_jobs[job_id] = {
+                'job_id': job_id,
+                'video_id': video_id,
+                'status': 'queued',
+                'message': 'Iniciando processamento...',
+                'created_at': datetime.now(timezone.utc),
+                'result': None,
+                'error': None
+            }
+        
+        # 3. INICIAR THREAD DE PROCESSAMENTO
+        thread = threading.Thread(
+            target=process_transcription_job,
+            args=(job_id, video_id),
+            daemon=True
+        )
+        thread.start()
+        
+        logger.info(f"🚀 Job criado: {job_id} para vídeo {video_id}")
+        
+        # 4. RETORNAR JOB_ID IMEDIATAMENTE
+        return {
+            "status": "processing",
+            "job_id": job_id,
+            "video_id": video_id,
+            "message": "Transcrição iniciada. Use /api/transcribe/status/{job_id} para verificar progresso."
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao criar job de transcrição: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/transcribe/status/{job_id}")
+async def get_transcription_status(job_id: str):
+    """
+    Verifica status do job de transcrição.
+    Frontend chama este endpoint a cada 5 segundos.
+    """
+    try:
+        with jobs_lock:
+            if job_id not in transcription_jobs:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Job não encontrado. Pode ter expirado (>1h) ou não existir."
+                )
+            
+            job = transcription_jobs[job_id]
+        
+        # Calcular tempo decorrido
+        elapsed = (datetime.now(timezone.utc) - job['created_at']).total_seconds()
+        
+        response = {
+            "job_id": job['job_id'],
+            "video_id": job['video_id'],
+            "status": job['status'],
+            "message": job['message'],
+            "elapsed_seconds": int(elapsed)
+        }
+        
+        # Se completo, incluir resultado
+        if job['status'] == 'completed':
+            response['result'] = job['result']
+            response['completed_at'] = job['completed_at'].isoformat()
+        
+        # Se falhou, incluir erro
+        if job['status'] == 'failed':
+            response['error'] = job['error']
+            response['failed_at'] = job['failed_at'].isoformat()
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro ao buscar status do job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/transcribe/jobs")
+async def list_active_jobs():
+    """
+    Lista todos os jobs ativos (para debug/admin).
+    """
+    try:
+        with jobs_lock:
+            jobs_list = []
+            for job_id, job in transcription_jobs.items():
+                jobs_list.append({
+                    'job_id': job['job_id'],
+                    'video_id': job['video_id'],
+                    'status': job['status'],
+                    'created_at': job['created_at'].isoformat(),
+                    'elapsed_seconds': int((datetime.now(timezone.utc) - job['created_at']).total_seconds())
+                })
+        
+        return {
+            "total_jobs": len(jobs_list),
+            "jobs": jobs_list
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao listar jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# ENDPOINTS ORIGINAIS (MANTIDOS INTACTOS)
+# ========================================
+
 @app.get("/")
 async def root():
     return {"message": "YouTube Dashboard API is running", "status": "healthy", "version": "1.0"}
@@ -50,7 +306,8 @@ async def health_check():
             "youtube_api": "configured",
             "collection_in_progress": collection_in_progress,
             "last_collection": last_collection_time.isoformat() if last_collection_time else None,
-            "quota_usada_hoje": quota_usada
+            "quota_usada_hoje": quota_usada,
+            "active_transcription_jobs": len(transcription_jobs)
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -136,7 +393,7 @@ async def get_videos(
     growth_min: Optional[float] = None,
     order_by: Optional[str] = "views_atuais",
     limit: Optional[int] = 100,
-    offset: Optional[int] = 0
+    offset: Optional[int] = None
 ):
     try:
         videos = await db.get_videos_with_filters(
@@ -589,93 +846,6 @@ async def toggle_regra_notificacao(regra_id: int):
         raise
     except Exception as e:
         logger.error(f"Error toggling regra: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/transcribe")
-async def transcribe_video(video_id: str):
-    """
-    Transcreve vídeo do YouTube
-    - Verifica cache primeiro
-    - Se não existir, baixa e transcreve
-    - Retorna texto limpo sem timestamps
-    """
-    try:
-        logger.info(f"🎬 Transcription request for video: {video_id}")
-        
-        # 1. Verificar cache
-        cached = await db.get_cached_transcription(video_id)
-        if cached:
-            logger.info(f"✅ Using cached transcription for: {video_id}")
-            return {
-                "transcription": cached,
-                "from_cache": True,
-                "video_id": video_id
-            }
-        
-        logger.info(f"📥 No cache found, processing video: {video_id}")
-        
-        # 2. Baixar vídeo
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        logger.info(f"⬇️ Downloading video from: {video_url}")
-        
-        import requests
-        import base64
-        
-        download_response = requests.post(
-            "https://download.2growai.com.br",
-            json={"video_url": video_url},
-            timeout=600  # ✅ MUDANÇA 1: 120s → 600s (10 minutos)
-        )
-        
-        if download_response.status_code != 200:
-            raise HTTPException(status_code=500, detail="Failed to download video")
-        
-        download_data = download_response.json()
-        logger.info(f"✅ Video downloaded: {download_data.get('video_id')}")
-        
-        # 3. Transcrever com WhisperX
-        logger.info(f"🎤 Transcribing video...")
-        
-        video_binary = base64.b64decode(download_data['data'])
-        
-        files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
-        # Não enviamos language para auto-detect
-        
-        transcription_response = requests.post(
-            "https://whisperx-dash.2growai.com.br/transcribe",
-            files=files,
-            timeout=1800  # ✅ MUDANÇA 2: 300s → 1800s (30 minutos)
-        )
-        
-        if transcription_response.status_code != 200:
-            raise HTTPException(status_code=500, detail="Failed to transcribe video")
-        
-        transcription_data = transcription_response.json()
-        logger.info(f"✅ Transcription completed: {len(transcription_data.get('segments', []))} segments")
-        
-        # 4. Formatar texto (remover timestamps)
-        clean_text = " ".join([
-            segment['text'].strip() 
-            for segment in transcription_data.get('segments', [])
-        ])
-        
-        logger.info(f"📝 Formatted transcription: {len(clean_text)} characters")
-        
-        # 5. Salvar cache
-        await db.save_transcription_cache(video_id, clean_text)
-        
-        # 6. Retornar
-        return {
-            "transcription": clean_text,
-            "from_cache": False,
-            "video_id": video_id,
-            "segments_count": len(transcription_data.get('segments', []))
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error transcribing video {video_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def run_collection_job():

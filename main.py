@@ -39,10 +39,7 @@ last_collection_time = None
 # 🆕 SISTEMA DE JOBS ASSÍNCRONOS
 # ========================================
 
-# Armazena jobs de transcrição em memória
 transcription_jobs: Dict[str, Dict[str, Any]] = {}
-
-# Lock para acesso thread-safe ao dicionário
 jobs_lock = threading.Lock()
 
 def cleanup_old_jobs():
@@ -58,19 +55,14 @@ def cleanup_old_jobs():
             del transcription_jobs[job_id]
 
 def process_transcription_job(job_id: str, video_id: str):
-    """
-    Processa transcrição em background thread.
-    Sem timeouts - pode levar quanto tempo for necessário.
-    """
+    """Processa transcrição em background thread"""
     try:
         logger.info(f"🎬 [JOB {job_id}] Iniciando transcrição: {video_id}")
         
-        # Atualizar status: downloading
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'downloading'
             transcription_jobs[job_id]['message'] = 'Baixando vídeo...'
         
-        # 1. BAIXAR VÍDEO
         import requests
         import base64
         
@@ -80,7 +72,7 @@ def process_transcription_job(job_id: str, video_id: str):
         download_response = requests.post(
             "https://download.2growai.com.br",
             json={"video_url": video_url},
-            timeout=300  # 5 minutos para download
+            timeout=300
         )
         
         if download_response.status_code != 200:
@@ -91,12 +83,10 @@ def process_transcription_job(job_id: str, video_id: str):
         
         logger.info(f"✅ [JOB {job_id}] Download completo: {len(video_binary)} bytes")
         
-        # Atualizar status: transcribing
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'transcribing'
             transcription_jobs[job_id]['message'] = 'Transcrevendo áudio...'
         
-        # 2. TRANSCREVER COM WHISPERX
         logger.info(f"🎤 [JOB {job_id}] Iniciando transcrição...")
         
         files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
@@ -104,7 +94,7 @@ def process_transcription_job(job_id: str, video_id: str):
         transcription_response = requests.post(
             "https://whisperx-dash.2growai.com.br/transcribe",
             files=files,
-            timeout=600  # 10 minutos para transcrição
+            timeout=600
         )
         
         if transcription_response.status_code != 200:
@@ -112,7 +102,6 @@ def process_transcription_job(job_id: str, video_id: str):
         
         transcription_data = transcription_response.json()
         
-        # 3. FORMATAR TEXTO
         clean_text = " ".join([
             segment['text'].strip() 
             for segment in transcription_data.get('segments', [])
@@ -120,10 +109,8 @@ def process_transcription_job(job_id: str, video_id: str):
         
         logger.info(f"📝 [JOB {job_id}] Transcrição completa: {len(clean_text)} caracteres")
         
-        # 4. SALVAR NO CACHE
         asyncio.run(db.save_transcription_cache(video_id, clean_text))
         
-        # 5. ATUALIZAR STATUS: COMPLETED
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'completed'
             transcription_jobs[job_id]['message'] = 'Transcrição concluída'
@@ -139,7 +126,6 @@ def process_transcription_job(job_id: str, video_id: str):
     except Exception as e:
         logger.error(f"❌ [JOB {job_id}] ERRO: {e}")
         
-        # Atualizar status: failed
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'failed'
             transcription_jobs[job_id]['message'] = str(e)
@@ -152,17 +138,12 @@ def process_transcription_job(job_id: str, video_id: str):
 
 @app.post("/api/transcribe")
 async def transcribe_video_async(video_id: str):
-    """
-    Inicia transcrição assíncrona.
-    Retorna job_id IMEDIATAMENTE para polling.
-    """
+    """Inicia transcrição assíncrona"""
     try:
         logger.info(f"🎬 Nova requisição de transcrição: {video_id}")
         
-        # Limpar jobs antigos
         cleanup_old_jobs()
         
-        # 1. VERIFICAR CACHE PRIMEIRO
         cached = await db.get_cached_transcription(video_id)
         if cached:
             logger.info(f"✅ Cache hit para: {video_id}")
@@ -175,7 +156,6 @@ async def transcribe_video_async(video_id: str):
                 }
             }
         
-        # 2. CRIAR JOB
         job_id = str(uuid.uuid4())
         
         with jobs_lock:
@@ -189,7 +169,6 @@ async def transcribe_video_async(video_id: str):
                 'error': None
             }
         
-        # 3. INICIAR THREAD DE PROCESSAMENTO
         thread = threading.Thread(
             target=process_transcription_job,
             args=(job_id, video_id),
@@ -199,7 +178,6 @@ async def transcribe_video_async(video_id: str):
         
         logger.info(f"🚀 Job criado: {job_id} para vídeo {video_id}")
         
-        # 4. RETORNAR JOB_ID IMEDIATAMENTE
         return {
             "status": "processing",
             "job_id": job_id,
@@ -214,10 +192,7 @@ async def transcribe_video_async(video_id: str):
 
 @app.get("/api/transcribe/status/{job_id}")
 async def get_transcription_status(job_id: str):
-    """
-    Verifica status do job de transcrição.
-    Frontend chama este endpoint a cada 5 segundos.
-    """
+    """Verifica status do job de transcrição"""
     try:
         with jobs_lock:
             if job_id not in transcription_jobs:
@@ -228,7 +203,6 @@ async def get_transcription_status(job_id: str):
             
             job = transcription_jobs[job_id]
         
-        # Calcular tempo decorrido
         elapsed = (datetime.now(timezone.utc) - job['created_at']).total_seconds()
         
         response = {
@@ -239,12 +213,10 @@ async def get_transcription_status(job_id: str):
             "elapsed_seconds": int(elapsed)
         }
         
-        # Se completo, incluir resultado
         if job['status'] == 'completed':
             response['result'] = job['result']
             response['completed_at'] = job['completed_at'].isoformat()
         
-        # Se falhou, incluir erro
         if job['status'] == 'failed':
             response['error'] = job['error']
             response['failed_at'] = job['failed_at'].isoformat()
@@ -260,9 +232,7 @@ async def get_transcription_status(job_id: str):
 
 @app.get("/api/transcribe/jobs")
 async def list_active_jobs():
-    """
-    Lista todos os jobs ativos (para debug/admin).
-    """
+    """Lista todos os jobs ativos"""
     try:
         with jobs_lock:
             jobs_list = []
@@ -285,7 +255,7 @@ async def list_active_jobs():
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
-# ENDPOINTS ORIGINAIS (MANTIDOS INTACTOS)
+# ENDPOINTS ORIGINAIS
 # ========================================
 
 @app.get("/")
@@ -542,21 +512,35 @@ async def get_coletas_historico(limit: Optional[int] = 20):
     try:
         historico = await db.get_coletas_historico(limit=limit)
         
-        quota_usada_hoje = await db.get_quota_diaria_usada()
+        quota_usada = await db.get_quota_diaria_usada()
         
         quota_total = len(collector.api_keys) * 10000  
-        quota_disponivel = quota_total - quota_usada_hoje
-        porcentagem_usada = (quota_usada_hoje / quota_total) * 100 if quota_total > 0 else 0
+        quota_disponivel = quota_total - quota_usada
+        porcentagem_usada = (quota_usada / quota_total) * 100 if quota_total > 0 else 0
+        
+        # 🆕 DADOS DETALHADOS DAS CHAVES
+        now_utc = datetime.now(timezone.utc)
+        next_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        
+        # Converter para horário de Brasília (UTC-3)
+        brasilia_offset = timedelta(hours=-3)
+        next_reset_brasilia = next_reset + brasilia_offset
         
         return {
             "historico": historico,
             "total": len(historico),
             "quota_info": {
                 "total_diario": quota_total,
-                "usado_hoje": quota_usada_hoje,
+                "usado_hoje": quota_usada,
                 "disponivel": quota_disponivel,
                 "porcentagem_usada": round(porcentagem_usada, 1),
-                "chaves_ativas": len(collector.api_keys)
+                "total_chaves": len(collector.api_keys),
+                "chaves_ativas": len(collector.api_keys) - len(collector.exhausted_keys_date),
+                "chaves_esgotadas": len(collector.exhausted_keys_date),
+                "chaves_esgotadas_ids": list(collector.exhausted_keys_date.keys()),
+                "requests_por_chave": collector.requests_per_key,
+                "proximo_reset_utc": next_reset.isoformat(),
+                "proximo_reset_local": next_reset_brasilia.strftime("%d/%m/%Y %H:%M (Horário de Brasília)")
             }
         }
     except Exception as e:

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import uvicorn
 import os
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ========================================
+# 🆕 MODELOS PYDANTIC
+# ========================================
+
+class RegraNotificacaoCreate(BaseModel):
+    nome_regra: str
+    views_minimas: int
+    periodo_dias: int
+    tipo_canal: str = "ambos"
+    subnichos: Optional[List[str]] = None
+    ativa: bool = True
+
+# ========================================
+# INICIALIZAÇÃO
+# ========================================
 
 db = SupabaseClient()
 collector = YouTubeCollector()
@@ -734,22 +751,16 @@ async def get_regras_notificacoes():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/regras-notificacoes")
-async def create_regra_notificacao(
-    nome_regra: str,
-    views_minimas: int,
-    periodo_dias: int,
-    tipo_canal: str = "ambos",
-    subnichos: Optional[List[str]] = None,  # 🆕 Array de strings
-    ativa: bool = True
-):
+async def create_regra_notificacao(regra: RegraNotificacaoCreate):
+    """🆕 Aceita JSON body via Pydantic model"""
     try:
         regra_data = {
-            "nome_regra": nome_regra,
-            "views_minimas": views_minimas,
-            "periodo_dias": periodo_dias,
-            "tipo_canal": tipo_canal,
-            "subnichos": subnichos,  # 🆕 Pode ser None ou lista
-            "ativa": ativa
+            "nome_regra": regra.nome_regra,
+            "views_minimas": regra.views_minimas,
+            "periodo_dias": regra.periodo_dias,
+            "tipo_canal": regra.tipo_canal,
+            "subnichos": regra.subnichos,
+            "ativa": regra.ativa
         }
         
         result = await db.create_regra_notificacao(regra_data)
@@ -766,23 +777,16 @@ async def create_regra_notificacao(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/regras-notificacoes/{regra_id}")
-async def update_regra_notificacao(
-    regra_id: int,
-    nome_regra: str,
-    views_minimas: int,
-    periodo_dias: int,
-    tipo_canal: str = "ambos",
-    subnichos: Optional[List[str]] = None,  # 🆕 Array de strings
-    ativa: bool = True
-):
+async def update_regra_notificacao(regra_id: int, regra: RegraNotificacaoCreate):
+    """🆕 Aceita JSON body via Pydantic model"""
     try:
         regra_data = {
-            "nome_regra": nome_regra,
-            "views_minimas": views_minimas,
-            "periodo_dias": periodo_dias,
-            "tipo_canal": tipo_canal,
-            "subnichos": subnichos,  # 🆕 Pode ser None ou lista
-            "ativa": ativa
+            "nome_regra": regra.nome_regra,
+            "views_minimas": regra.views_minimas,
+            "periodo_dias": regra.periodo_dias,
+            "tipo_canal": regra.tipo_canal,
+            "subnichos": regra.subnichos,
+            "ativa": regra.ativa
         }
         
         result = await db.update_regra_notificacao(regra_id, regra_data)

@@ -2,6 +2,7 @@
 Sistema de Notificacoes - Notifier
 Verifica videos que atingiram marcos e cria notificacoes automaticamente.
 Com sistema anti-duplicacao e elevacao de notificacoes.
+🆕 SUPORTA MÚLTIPLOS SUBNICHOS POR REGRA
 """
 
 import logging
@@ -64,6 +65,12 @@ class NotificationChecker:
                 logger.info(f"Processando regra: {regra['nome_regra']}")
                 logger.info(f"Marco: {regra['views_minimas']} views em {regra['periodo_dias']} dia(s)")
                 
+                # 🆕 Log de subnichos da regra
+                if regra.get('subnichos'):
+                    logger.info(f"Subnichos: {', '.join(regra['subnichos'])}")
+                else:
+                    logger.info("Subnichos: TODOS")
+                
                 # Buscar videos que atingiram o marco
                 videos = await self.get_videos_that_hit_milestone(regra)
                 
@@ -92,14 +99,14 @@ class NotificationChecker:
                             logger.info(f"✅ NOTIFICACAO ATUALIZADA: '{video['titulo'][:50]}...' ({regra_anterior['nome_regra']} → {regra['nome_regra']})")
                         else:
                             total_puladas += 1
-                            logger.info(f"⏭️  Video '{video['titulo'][:50]}...' ja tem notificacao igual ou maior - PULANDO")
+                            logger.info(f"⭕ Video '{video['titulo'][:50]}...' ja tem notificacao igual ou maior - PULANDO")
                     else:
                         # Verificar se já foi visto alguma vez
                         ja_visto = await self.video_already_seen(video['video_id'])
                         
                         if ja_visto:
                             total_puladas += 1
-                            logger.info(f"👁️  Video '{video['titulo'][:50]}...' ja foi visto anteriormente - PULANDO")
+                            logger.info(f"👁️ Video '{video['titulo'][:50]}...' ja foi visto anteriormente - PULANDO")
                             continue
                         
                         # Criar nova notificacao
@@ -139,7 +146,7 @@ class NotificationChecker:
     
     async def get_unread_notification(self, video_id: str) -> Optional[Dict]:
         """
-        Busca notificação NAO VISTA do vídeo.
+        Busca notificação NÃO VISTA do vídeo.
         Retorna apenas a primeira (mais recente).
         """
         try:
@@ -269,6 +276,7 @@ class NotificationChecker:
     async def get_videos_that_hit_milestone(self, regra: Dict) -> List[Dict]:
         """
         Busca videos que atingiram o marco especificado na regra.
+        🆕 SUPORTA FILTRO POR MÚLTIPLOS SUBNICHOS
         """
         try:
             # Calcular data de corte
@@ -276,7 +284,7 @@ class NotificationChecker:
             
             # Buscar videos recentes com views suficientes
             query = self.db.table("videos_historico").select(
-                "*, canais_monitorados!inner(tipo, nome_canal)"
+                "*, canais_monitorados!inner(tipo, nome_canal, subnicho)"
             ).gte("data_publicacao", cutoff_date).gte("views_atuais", regra['views_minimas'])
             
             # Filtrar por tipo de canal se necessario
@@ -290,11 +298,21 @@ class NotificationChecker:
             videos = []
             if response.data:
                 for item in response.data:
+                    canal_info = item.get('canais_monitorados', {})
+                    video_subnicho = canal_info.get('subnicho')
+                    
+                    # 🆕 FILTRAR POR SUBNICHOS DA REGRA
+                    if regra.get('subnichos'):
+                        # Se regra tem subnichos específicos, verificar se vídeo está na lista
+                        if video_subnicho not in regra['subnichos']:
+                            continue  # Pula este vídeo
+                    # Se regra não tem subnichos, aceita TODOS
+                    
                     videos.append({
                         'video_id': item['video_id'],
                         'titulo': item['titulo'],
                         'canal_id': item['canal_id'],
-                        'nome_canal': item.get('canais_monitorados', {}).get('nome_canal', 'Unknown'),
+                        'nome_canal': canal_info.get('nome_canal', 'Unknown'),
                         'views_atuais': item['views_atuais'],
                         'data_publicacao': item['data_publicacao']
                     })

@@ -72,68 +72,48 @@ def cleanup_old_jobs():
             del transcription_jobs[job_id]
 
 def process_transcription_job(job_id: str, video_id: str):
-    """Processa transcrição em background thread"""
+    """Processa transcrição usando servidor M5 local"""
     try:
         logger.info(f"🎬 [JOB {job_id}] Iniciando transcrição: {video_id}")
         
         with jobs_lock:
-            transcription_jobs[job_id]['status'] = 'downloading'
-            transcription_jobs[job_id]['message'] = 'Baixando vídeo...'
+            transcription_jobs[job_id]['status'] = 'processing'
+            transcription_jobs[job_id]['message'] = 'Processando transcrição na M5...'
         
         import requests
-        import base64
         
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        logger.info(f"⬇️ [JOB {job_id}] Baixando: {video_url}")
+        # Chamar endpoint M5 que faz tudo localmente
+        logger.info(f"📡 [JOB {job_id}] Chamando servidor M5...")
         
-        download_response = requests.post(
-            "https://download.2growai.com.br",
-            json={"video_url": video_url},
-            timeout=300
+        response = requests.post(
+            "https://transcription.2growai.com.br/transcribe",
+            json={
+                "video_id": video_id,
+                "language": "en"
+            },
+            timeout=900  # 15 minutos
         )
         
-        if download_response.status_code != 200:
-            raise Exception("Falha no download do vídeo")
+        if response.status_code != 200:
+            raise Exception(f"Servidor M5 retornou erro: {response.status_code}")
         
-        download_data = download_response.json()
-        video_binary = base64.b64decode(download_data['data'])
+        data = response.json()
         
-        logger.info(f"✅ [JOB {job_id}] Download completo: {len(video_binary)} bytes")
+        if data.get('status') != 'success':
+            raise Exception(data.get('error', 'Erro desconhecido no servidor M5'))
         
-        with jobs_lock:
-            transcription_jobs[job_id]['status'] = 'transcribing'
-            transcription_jobs[job_id]['message'] = 'Transcrevendo áudio...'
+        transcription = data.get('transcription', '')
         
-        logger.info(f"🎤 [JOB {job_id}] Iniciando transcrição...")
+        logger.info(f"✅ [JOB {job_id}] Transcrição completa: {len(transcription)} caracteres")
         
-        files = {'audio': ('video.mp4', video_binary, 'video/mp4')}
-        
-        transcription_response = requests.post(
-            "https://whisperx-dash.2growai.com.br/transcribe",
-            files=files,
-            timeout=600
-        )
-        
-        if transcription_response.status_code != 200:
-            raise Exception("Falha na transcrição do vídeo")
-        
-        transcription_data = transcription_response.json()
-        
-        clean_text = " ".join([
-            segment['text'].strip() 
-            for segment in transcription_data.get('segments', [])
-        ])
-        
-        logger.info(f"📝 [JOB {job_id}] Transcrição completa: {len(clean_text)} caracteres")
-        
-        asyncio.run(db.save_transcription_cache(video_id, clean_text))
+        # Salvar no cache
+        asyncio.run(db.save_transcription_cache(video_id, transcription))
         
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'completed'
             transcription_jobs[job_id]['message'] = 'Transcrição concluída'
             transcription_jobs[job_id]['result'] = {
-                'transcription': clean_text,
-                'segments_count': len(transcription_data.get('segments', [])),
+                'transcription': transcription,
                 'video_id': video_id
             }
             transcription_jobs[job_id]['completed_at'] = datetime.now(timezone.utc)
@@ -148,129 +128,6 @@ def process_transcription_job(job_id: str, video_id: str):
             transcription_jobs[job_id]['message'] = str(e)
             transcription_jobs[job_id]['error'] = str(e)
             transcription_jobs[job_id]['failed_at'] = datetime.now(timezone.utc)
-
-# ========================================
-# ENDPOINTS DE TRANSCRIÇÃO ASSÍNCRONA
-# ========================================
-
-@app.post("/api/transcribe")
-async def transcribe_video_async(video_id: str):
-    """Inicia transcrição assíncrona"""
-    try:
-        logger.info(f"🎬 Nova requisição de transcrição: {video_id}")
-        
-        cleanup_old_jobs()
-        
-        cached = await db.get_cached_transcription(video_id)
-        if cached:
-            logger.info(f"✅ Cache hit para: {video_id}")
-            return {
-                "status": "completed",
-                "from_cache": True,
-                "result": {
-                    "transcription": cached,
-                    "video_id": video_id
-                }
-            }
-        
-        job_id = str(uuid.uuid4())
-        
-        with jobs_lock:
-            transcription_jobs[job_id] = {
-                'job_id': job_id,
-                'video_id': video_id,
-                'status': 'queued',
-                'message': 'Iniciando processamento...',
-                'created_at': datetime.now(timezone.utc),
-                'result': None,
-                'error': None
-            }
-        
-        thread = threading.Thread(
-            target=process_transcription_job,
-            args=(job_id, video_id),
-            daemon=True
-        )
-        thread.start()
-        
-        logger.info(f"🚀 Job criado: {job_id} para vídeo {video_id}")
-        
-        return {
-            "status": "processing",
-            "job_id": job_id,
-            "video_id": video_id,
-            "message": "Transcrição iniciada. Use /api/transcribe/status/{job_id} para verificar progresso."
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao criar job de transcrição: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/transcribe/status/{job_id}")
-async def get_transcription_status(job_id: str):
-    """Verifica status do job de transcrição"""
-    try:
-        with jobs_lock:
-            if job_id not in transcription_jobs:
-                raise HTTPException(
-                    status_code=404, 
-                    detail="Job não encontrado. Pode ter expirado (>1h) ou não existir."
-                )
-            
-            job = transcription_jobs[job_id]
-        
-        elapsed = (datetime.now(timezone.utc) - job['created_at']).total_seconds()
-        
-        response = {
-            "job_id": job['job_id'],
-            "video_id": job['video_id'],
-            "status": job['status'],
-            "message": job['message'],
-            "elapsed_seconds": int(elapsed)
-        }
-        
-        if job['status'] == 'completed':
-            response['result'] = job['result']
-            response['completed_at'] = job['completed_at'].isoformat()
-        
-        if job['status'] == 'failed':
-            response['error'] = job['error']
-            response['failed_at'] = job['failed_at'].isoformat()
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Erro ao buscar status do job: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/transcribe/jobs")
-async def list_active_jobs():
-    """Lista todos os jobs ativos"""
-    try:
-        with jobs_lock:
-            jobs_list = []
-            for job_id, job in transcription_jobs.items():
-                jobs_list.append({
-                    'job_id': job['job_id'],
-                    'video_id': job['video_id'],
-                    'status': job['status'],
-                    'created_at': job['created_at'].isoformat(),
-                    'elapsed_seconds': int((datetime.now(timezone.utc) - job['created_at']).total_seconds())
-                })
-        
-        return {
-            "total_jobs": len(jobs_list),
-            "jobs": jobs_list
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao listar jobs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # ========================================
 # ENDPOINTS ORIGINAIS
 # ========================================

@@ -72,18 +72,19 @@ def cleanup_old_jobs():
             del transcription_jobs[job_id]
 
 def process_transcription_job(job_id: str, video_id: str):
-    """Processa transcrição usando servidor M5 local"""
+    """Processa transcrição usando servidor M5 local com polling"""
     try:
         logger.info(f"🎬 [JOB {job_id}] Iniciando transcrição: {video_id}")
         
         with jobs_lock:
             transcription_jobs[job_id]['status'] = 'processing'
-            transcription_jobs[job_id]['message'] = 'Processando transcrição na M5...'
+            transcription_jobs[job_id]['message'] = 'Iniciando job no servidor M5...'
         
         import requests
+        import time
         
-        # Chamar endpoint M5 que faz tudo localmente
-        logger.info(f"📡 [JOB {job_id}] Chamando servidor M5...")
+        # PASSO 1: Criar job no M5
+        logger.info(f"📡 [JOB {job_id}] Criando job no servidor M5...")
         
         response = requests.post(
             "https://transcription.2growai.com.br/transcribe",
@@ -91,34 +92,79 @@ def process_transcription_job(job_id: str, video_id: str):
                 "video_id": video_id,
                 "language": "en"
             },
-            timeout=1800  # 30 minutos
+            timeout=30  # Só para criar o job
         )
         
         if response.status_code != 200:
             raise Exception(f"Servidor M5 retornou erro: {response.status_code}")
         
         data = response.json()
+        m5_job_id = data.get('job_id')
         
-        if data.get('status') != 'success':
-            raise Exception(data.get('error', 'Erro desconhecido no servidor M5'))
+        if not m5_job_id:
+            raise Exception("Servidor M5 não retornou job_id")
         
-        transcription = data.get('transcription', '')
+        logger.info(f"✅ [JOB {job_id}] Job criado no M5: {m5_job_id}")
         
-        logger.info(f"✅ [JOB {job_id}] Transcrição completa: {len(transcription)} caracteres")
+        # PASSO 2: Fazer polling até completar
+        max_attempts = 360  # 30 minutos (360 * 5s)
+        attempt = 0
         
-        # Salvar no cache
-        asyncio.run(db.save_transcription_cache(video_id, transcription))
+        while attempt < max_attempts:
+            time.sleep(5)  # Aguardar 5 segundos entre checks
+            attempt += 1
+            
+            try:
+                status_response = requests.get(
+                    f"https://transcription.2growai.com.br/status/{m5_job_id}",
+                    timeout=10
+                )
+                
+                if status_response.status_code != 200:
+                    continue
+                
+                status_data = status_response.json()
+                m5_status = status_data.get('status')
+                
+                # Atualizar mensagem
+                with jobs_lock:
+                    transcription_jobs[job_id]['message'] = status_data.get('message', 'Processando...')
+                
+                logger.info(f"📊 [JOB {job_id}] Status M5: {m5_status} ({status_data.get('elapsed_seconds')}s)")
+                
+                # Verificar se completou
+                if m5_status == 'completed':
+                    result = status_data.get('result', {})
+                    transcription = result.get('transcription', '')
+                    
+                    logger.info(f"✅ [JOB {job_id}] Transcrição completa: {len(transcription)} caracteres")
+                    
+                    # Salvar no cache
+                    asyncio.run(db.save_transcription_cache(video_id, transcription))
+                    
+                    with jobs_lock:
+                        transcription_jobs[job_id]['status'] = 'completed'
+                        transcription_jobs[job_id]['message'] = 'Transcrição concluída'
+                        transcription_jobs[job_id]['result'] = {
+                            'transcription': transcription,
+                            'video_id': video_id
+                        }
+                        transcription_jobs[job_id]['completed_at'] = datetime.now(timezone.utc)
+                    
+                    logger.info(f"✅ [JOB {job_id}] SUCESSO")
+                    return
+                
+                # Verificar se falhou
+                if m5_status == 'failed':
+                    error_msg = status_data.get('error', 'Erro desconhecido no servidor M5')
+                    raise Exception(error_msg)
+                
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"⚠️ [JOB {job_id}] Erro no polling (tentativa {attempt}): {e}")
+                continue
         
-        with jobs_lock:
-            transcription_jobs[job_id]['status'] = 'completed'
-            transcription_jobs[job_id]['message'] = 'Transcrição concluída'
-            transcription_jobs[job_id]['result'] = {
-                'transcription': transcription,
-                'video_id': video_id
-            }
-            transcription_jobs[job_id]['completed_at'] = datetime.now(timezone.utc)
-        
-        logger.info(f"✅ [JOB {job_id}] SUCESSO")
+        # Timeout
+        raise Exception(f"Timeout após {max_attempts * 5} segundos aguardando servidor M5")
         
     except Exception as e:
         logger.error(f"❌ [JOB {job_id}] ERRO: {e}")

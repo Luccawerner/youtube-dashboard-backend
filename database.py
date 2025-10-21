@@ -243,106 +243,131 @@ class SupabaseClient:
             raise
 
     async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_60d_min: Optional[int] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
-        try:
-            query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
+    try:
+        # 🆕 OTIMIZAÇÃO CRÍTICA: Buscar apenas historico dos últimos 2 dias
+        # Isso garante que sempre pega os dados MAIS RECENTES e evita carregar milhares de linhas
+        dois_dias_atras = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+        
+        logger.info(f"📊 Buscando histórico a partir de: {dois_dias_atras}")
+        
+        query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
+        
+        if nicho:
+            query = query.eq("nicho", nicho)
+        if subnicho:
+            query = query.eq("subnicho", subnicho)
+        if lingua:
+            query = query.eq("lingua", lingua)
+        if tipo:
+            query = query.eq("tipo", tipo)
+        
+        canais_response = query.execute()
+        
+        # 🆕 BUSCAR APENAS HISTÓRICO RECENTE (últimos 2 dias)
+        historico_response = self.supabase.table("dados_canais_historico")\
+            .select("*")\
+            .gte("data_coleta", dois_dias_atras)\
+            .execute()
+        
+        logger.info(f"📊 Histórico carregado: {len(historico_response.data)} linhas (otimizado)")
+        
+        # 🆕 Pegar o MAIS RECENTE de cada canal (ordenando por data DESC)
+        historico_dict = {}
+        for h in historico_response.data:
+            canal_id = h["canal_id"]
+            data_coleta = h.get("data_coleta", "")
             
-            if nicho:
-                query = query.eq("nicho", nicho)
-            if subnicho:
-                query = query.eq("subnicho", subnicho)
-            if lingua:
-                query = query.eq("lingua", lingua)
-            if tipo:
-                query = query.eq("tipo", tipo)
+            if canal_id not in historico_dict:
+                historico_dict[canal_id] = h
+            elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                # 🆕 SEMPRE pega o mais recente
+                historico_dict[canal_id] = h
+        
+        logger.info(f"📊 Canais com histórico: {len(historico_dict)}")
+        
+        canais = []
+        for item in canais_response.data:
+            canal = {
+                "id": item["id"],
+                "nome_canal": item["nome_canal"],
+                "url_canal": item["url_canal"],
+                "nicho": item["nicho"],
+                "subnicho": item["subnicho"],
+                "lingua": item.get("lingua", "N/A"),
+                "tipo": item.get("tipo", "minerado"),
+                "status": item["status"],
+                "ultima_coleta": item.get("ultima_coleta"),
+                "views_60d": 0,
+                "views_30d": 0,
+                "views_15d": 0,
+                "views_7d": 0,
+                "inscritos": 0,
+                "engagement_rate": 0.0,
+                "videos_publicados_7d": 0,
+                "score_calculado": 0,
+                "growth_30d": 0,
+                "growth_7d": 0
+            }
             
-            canais_response = query.execute()
-            historico_response = self.supabase.table("dados_canais_historico").select("*").execute()
-            
-            historico_dict = {}
-            for h in historico_response.data:
-                canal_id = h["canal_id"]
-                data_coleta = h.get("data_coleta", "")
+            # 🆕 Se tem histórico recente, usa ele
+            if item["id"] in historico_dict:
+                h = historico_dict[item["id"]]
                 
-                if canal_id not in historico_dict:
-                    historico_dict[canal_id] = h
-                elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
-                    historico_dict[canal_id] = h
-            
-            canais = []
-            for item in canais_response.data:
-                canal = {
-                    "id": item["id"],
-                    "nome_canal": item["nome_canal"],
-                    "url_canal": item["url_canal"],
-                    "nicho": item["nicho"],
-                    "subnicho": item["subnicho"],
-                    "lingua": item.get("lingua", "N/A"),
-                    "tipo": item.get("tipo", "minerado"),
-                    "status": item["status"],
-                    "ultima_coleta": item.get("ultima_coleta"),
-                    "views_60d": 0,
-                    "views_30d": 0,
-                    "views_15d": 0,
-                    "views_7d": 0,
-                    "inscritos": 0,
-                    "engagement_rate": 0.0,
-                    "videos_publicados_7d": 0,
-                    "score_calculado": 0,
-                    "growth_30d": 0,
-                    "growth_7d": 0
-                }
+                canal["views_60d"] = h.get("views_60d", 0)
+                canal["views_30d"] = h.get("views_30d", 0)
+                canal["views_15d"] = h.get("views_15d", 0)
+                canal["views_7d"] = h.get("views_7d", 0)
+                canal["inscritos"] = h.get("inscritos", 0)
+                canal["engagement_rate"] = h.get("engagement_rate", 0.0)
+                canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
                 
-                if item["id"] in historico_dict:
-                    h = historico_dict[item["id"]]
-                    
-                    canal["views_60d"] = h.get("views_60d", 0)
-                    canal["views_30d"] = h.get("views_30d", 0)
-                    canal["views_15d"] = h.get("views_15d", 0)
-                    canal["views_7d"] = h.get("views_7d", 0)
-                    canal["inscritos"] = h.get("inscritos", 0)
-                    canal["engagement_rate"] = h.get("engagement_rate", 0.0)
-                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
-                    
-                    if canal["inscritos"] > 0:
-                        score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
-                        canal["score_calculado"] = round(score, 2)
-                    
-                    if canal["views_30d"] > 0 and canal["views_60d"] > 0:
-                        views_anterior_30d = canal["views_60d"] - canal["views_30d"]
-                        if views_anterior_30d > 0:
-                            growth = ((canal["views_30d"] - views_anterior_30d) / views_anterior_30d) * 100
-                            canal["growth_30d"] = round(growth, 2)
-                    
-                    if canal["views_7d"] > 0 and canal["views_15d"] > 0:
-                        views_anterior_7d = canal["views_15d"] - canal["views_7d"]
-                        if views_anterior_7d > 0:
-                            growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
-                            canal["growth_7d"] = round(growth, 2)
+                # Calcular score
+                if canal["inscritos"] > 0:
+                    score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
+                    canal["score_calculado"] = round(score, 2)
                 
-                canais.append(canal)
+                # Calcular growth 30d
+                if canal["views_30d"] > 0 and canal["views_60d"] > 0:
+                    views_anterior_30d = canal["views_60d"] - canal["views_30d"]
+                    if views_anterior_30d > 0:
+                        growth = ((canal["views_30d"] - views_anterior_30d) / views_anterior_30d) * 100
+                        canal["growth_30d"] = round(growth, 2)
+                
+                # Calcular growth 7d
+                if canal["views_7d"] > 0 and canal["views_15d"] > 0:
+                    views_anterior_7d = canal["views_15d"] - canal["views_7d"]
+                    if views_anterior_7d > 0:
+                        growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
+                        canal["growth_7d"] = round(growth, 2)
             
-            if views_60d_min:
-                canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
-            if views_30d_min:
-                canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
-            if views_15d_min:
-                canais = [c for c in canais if c.get("views_15d", 0) >= views_15d_min]
-            if views_7d_min:
-                canais = [c for c in canais if c.get("views_7d", 0) >= views_7d_min]
-            if score_min:
-                canais = [c for c in canais if c.get("score_calculado", 0) >= score_min]
-            if growth_min:
-                canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
-            
-            canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
-            
-            return canais[offset:offset + limit]
-            
-        except Exception as e:
-            logger.error(f"Error fetching canais with filters: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
+            canais.append(canal)
+        
+        # Aplicar filtros numéricos
+        if views_60d_min:
+            canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
+        if views_30d_min:
+            canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
+        if views_15d_min:
+            canais = [c for c in canais if c.get("views_15d", 0) >= views_15d_min]
+        if views_7d_min:
+            canais = [c for c in canais if c.get("views_7d", 0) >= views_7d_min]
+        if score_min:
+            canais = [c for c in canais if c.get("score_calculado", 0) >= score_min]
+        if growth_min:
+            canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
+        
+        # Ordenar por score
+        canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
+        
+        logger.info(f"✅ Retornando {len(canais)} canais filtrados")
+        
+        return canais[offset:offset + limit]
+        
+    except Exception as e:
+        logger.error(f"Error fetching canais with filters: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise
 
     async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "60d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 500, offset: int = 0) -> List[Dict]:
         try:

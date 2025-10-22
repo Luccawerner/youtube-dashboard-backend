@@ -563,6 +563,9 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         
         brasilia_offset = timedelta(hours=-3)
         next_reset_brasilia = next_reset + brasilia_offset
+
+        chaves_esgotadas_real = min(int(quota_usada // 10000), len(collector.api_keys))
+        chaves_ativas_real = len(collector.api_keys) - chaves_esgotadas_real
         
         return {
             "historico": historico,
@@ -573,8 +576,8 @@ async def get_coletas_historico(limit: Optional[int] = 20):
                 "disponivel": quota_disponivel,
                 "porcentagem_usada": round(porcentagem_usada, 1),
                 "total_chaves": len(collector.api_keys),
-                "chaves_ativas": len(collector.api_keys) - len(collector.exhausted_keys_date),
-                "chaves_esgotadas": len(collector.exhausted_keys_date),
+                "chaves_ativas": chaves_ativas_real,
+                "chaves_esgotadas": chaves_esgotadas_real,
                 "chaves_esgotadas_ids": list(collector.exhausted_keys_date.keys()),
                 "proximo_reset_utc": next_reset.isoformat(),
                 "proximo_reset_local": next_reset_brasilia.strftime("%d/%m/%Y %H:%M (Horário de Brasília)")

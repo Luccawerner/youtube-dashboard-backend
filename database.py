@@ -72,7 +72,6 @@ class SupabaseClient:
             canal_data = {
                 "canal_id": canal_id,
                 "data_coleta": data_coleta,
-                "views_60d": data.get("views_60d"),
                 "views_30d": data.get("views_30d"),
                 "views_15d": data.get("views_15d"),
                 "views_7d": data.get("views_7d"),
@@ -242,7 +241,7 @@ class SupabaseClient:
             logger.error(f"Error deleting coleta: {e}")
             raise
 
-    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_60d_min: Optional[int] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
+    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
         """
         🆕 VERSÃO OTIMIZADA - Busca apenas histórico dos últimos 2 dias
         Isso garante dados SEMPRE atualizados e evita carregar milhares de linhas antigas
@@ -300,7 +299,6 @@ class SupabaseClient:
                     "tipo": item.get("tipo", "minerado"),
                     "status": item["status"],
                     "ultima_coleta": item.get("ultima_coleta"),
-                    "views_60d": 0,
                     "views_30d": 0,
                     "views_15d": 0,
                     "views_7d": 0,
@@ -316,7 +314,6 @@ class SupabaseClient:
                 if item["id"] in historico_dict:
                     h = historico_dict[item["id"]]
                     
-                    canal["views_60d"] = h.get("views_60d", 0)
                     canal["views_30d"] = h.get("views_30d", 0)
                     canal["views_15d"] = h.get("views_15d", 0)
                     canal["views_7d"] = h.get("views_7d", 0)
@@ -329,13 +326,6 @@ class SupabaseClient:
                         score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
                         canal["score_calculado"] = round(score, 2)
                     
-                    # Calcular growth 30d
-                    if canal["views_30d"] > 0 and canal["views_60d"] > 0:
-                        views_anterior_30d = canal["views_60d"] - canal["views_30d"]
-                        if views_anterior_30d > 0:
-                            growth = ((canal["views_30d"] - views_anterior_30d) / views_anterior_30d) * 100
-                            canal["growth_30d"] = round(growth, 2)
-                    
                     # Calcular growth 7d
                     if canal["views_7d"] > 0 and canal["views_15d"] > 0:
                         views_anterior_7d = canal["views_15d"] - canal["views_7d"]
@@ -346,8 +336,6 @@ class SupabaseClient:
                 canais.append(canal)
             
             # Aplicar filtros numéricos
-            if views_60d_min:
-                canais = [c for c in canais if c.get("views_60d", 0) >= views_60d_min]
             if views_30d_min:
                 canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
             if views_15d_min:

@@ -923,7 +923,7 @@ async def run_collection_job():
                 continue
         
         stats = collector.get_request_stats()
-        total_requests = stats['total_requests']
+        total_requests = stats['total_quota_units']
         
         logger.info("=" * 80)
         logger.info(f"📊 COLLECTION STATISTICS")
@@ -985,7 +985,7 @@ async def run_collection_job():
                 canais_sucesso=canais_sucesso,
                 canais_erro=canais_erro,
                 videos_coletados=videos_total,
-                requisicoes_usadas=collector.total_requests if hasattr(collector, 'total_requests') else 0,
+                requisicoes_usadas=collector.total_quota_units if hasattr(collector, 'total_quota_units') else 0
                 mensagem_erro=str(e)
             )
         

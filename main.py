@@ -888,7 +888,7 @@ async def run_collection_job():
                 logger.error("=" * 80)
                 logger.error("❌ ALL API KEYS EXHAUSTED - STOPPING COLLECTION")
                 logger.error(f"✅ Collected {canais_sucesso}/{total_canais} canais")
-                logger.error(f"📊 Total requests used: {collector.total_requests}")
+                logger.error(f"📊 Total requests used: {collector.total_quota_units}")
                 logger.error("=" * 80)
                 break
             
@@ -1026,7 +1026,7 @@ async def schedule_daily_collection():
         try:
             now = datetime.now(timezone.utc)
             
-            next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+            next_run = now.replace(hour=8, minute=0, second=0, microsecond=0)
             
             if next_run <= now:
                 next_run += timedelta(days=1)
@@ -1034,7 +1034,7 @@ async def schedule_daily_collection():
             sleep_seconds = (next_run - now).total_seconds()
             
             logger.info("=" * 80)
-            logger.info(f"⏰ Next collection: {next_run.isoformat()} (07:00 AM São Paulo)")
+            logger.info(f"⏰ Next collection: {next_run.isoformat()} (05:00 AM São Paulo)")
             logger.info(f"⏳ Sleeping for {sleep_seconds/3600:.1f} hours")
             logger.info("=" * 80)
             

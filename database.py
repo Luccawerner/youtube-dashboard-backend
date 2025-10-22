@@ -550,47 +550,96 @@ class SupabaseClient:
             raise
 
     async def get_notificacoes_nao_vistas(self) -> List[Dict]:
-        try:
-            response = self.supabase.table("notificacoes").select(
-                "*, canais_monitorados!inner(subnicho)"
-            ).eq("vista", False).order("data_disparo", desc=True).execute()
-            
-            if response.data:
-                for notif in response.data:
-                    if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
-                        notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
-                    else:
-                        notif["subnicho"] = None
-                    notif.pop("canais_monitorados", None)
-            
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
+    try:
+        # Buscar notificações não vistas
+        response = self.supabase.table("notificacoes").select(
+            "*, canais_monitorados!inner(subnicho)"
+        ).eq("vista", False).order("data_disparo", desc=True).execute()
+        
+        if not response.data:
             return []
+        
+        notificacoes = response.data
+        
+        # Buscar dados dos vídeos (incluindo data_publicacao)
+        video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
+        
+        if video_ids:
+            videos_response = self.supabase.table("videos_historico").select(
+                "video_id, data_publicacao"
+            ).in_("video_id", video_ids).execute()
+            
+            # Criar dicionário de video_id -> data_publicacao
+            videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+            
+            # Adicionar data_publicacao em cada notificação
+            for notif in notificacoes:
+                video_id = notif.get("video_id")
+                if video_id and video_id in videos_dict:
+                    notif["data_publicacao"] = videos_dict[video_id]
+                else:
+                    notif["data_publicacao"] = None
+        
+        # Processar subnicho
+        for notif in notificacoes:
+            if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
+            else:
+                notif["subnicho"] = None
+            notif.pop("canais_monitorados", None)
+        
+        return notificacoes
+    except Exception as e:
+        logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
+        return []
     
     async def get_notificacoes_all(self, limit: int = 50, offset: int = 0, vista_filter: Optional[bool] = None) -> List[Dict]:
-        try:
-            query = self.supabase.table("notificacoes").select(
-                "*, canais_monitorados(subnicho)"
-            )
-            
-            if vista_filter is not None:
-                query = query.eq("vista", vista_filter)
-            
-            response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
-            
-            if response.data:
-                for notif in response.data:
-                    if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
-                        notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
-                    else:
-                        notif["subnicho"] = None
-                    notif.pop("canais_monitorados", None)
-            
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"Erro ao buscar notificacoes: {e}")
+    try:
+        query = self.supabase.table("notificacoes").select(
+            "*, canais_monitorados(subnicho)"
+        )
+        
+        if vista_filter is not None:
+            query = query.eq("vista", vista_filter)
+        
+        response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
+        
+        if not response.data:
             return []
+        
+        notificacoes = response.data
+        
+        # Buscar dados dos vídeos (incluindo data_publicacao)
+        video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
+        
+        if video_ids:
+            videos_response = self.supabase.table("videos_historico").select(
+                "video_id, data_publicacao"
+            ).in_("video_id", video_ids).execute()
+            
+            # Criar dicionário de video_id -> data_publicacao
+            videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+            
+            # Adicionar data_publicacao em cada notificação
+            for notif in notificacoes:
+                video_id = notif.get("video_id")
+                if video_id and video_id in videos_dict:
+                    notif["data_publicacao"] = videos_dict[video_id]
+                else:
+                    notif["data_publicacao"] = None
+        
+        # Processar subnicho
+        for notif in notificacoes:
+            if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
+            else:
+                notif["subnicho"] = None
+            notif.pop("canais_monitorados", None)
+        
+        return notificacoes
+    except Exception as e:
+        logger.error(f"Erro ao buscar notificacoes: {e}")
+        return []
     
     async def marcar_notificacao_vista(self, notif_id: int) -> bool:
         try:

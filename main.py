@@ -576,7 +576,6 @@ async def get_coletas_historico(limit: Optional[int] = 20):
                 "chaves_ativas": len(collector.api_keys) - len(collector.exhausted_keys_date),
                 "chaves_esgotadas": len(collector.exhausted_keys_date),
                 "chaves_esgotadas_ids": list(collector.exhausted_keys_date.keys()),
-                "requests_por_chave": collector.requests_per_key,
                 "proximo_reset_utc": next_reset.isoformat(),
                 "proximo_reset_local": next_reset_brasilia.strftime("%d/%m/%Y %H:%M (Horário de Brasília)")
             }

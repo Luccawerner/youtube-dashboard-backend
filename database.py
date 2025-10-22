@@ -58,11 +58,14 @@ class SupabaseClient:
         try:
             data_coleta = datetime.now(timezone.utc).date().isoformat()
             
+            # 🔧 CORREÇÃO: Voltei a checar views_60d (não gasta API, é só validação!)
+            views_60d = data.get("views_60d", 0)
             views_30d = data.get("views_30d", 0)
             views_15d = data.get("views_15d", 0)
             views_7d = data.get("views_7d", 0)
             
-            if views_30d == 0 and views_15d == 0 and views_7d == 0:
+            # Check if at least one view metric is > 0
+            if views_60d == 0 and views_30d == 0 and views_15d == 0 and views_7d == 0:
                 logger.warning(f"Skipping save for canal_id {canal_id} - all views zero")
                 return None
             
@@ -241,22 +244,34 @@ class SupabaseClient:
 
     async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
         try:
-            response = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo").execute()
+            # 🔧 CORREÇÃO CRÍTICA: Buscar apenas histórico dos últimos 2 dias
+            # Isso garante que sempre pega os dados MAIS RECENTES e evita carregar dados antigos
+            dois_dias_atras = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
             
-            canais = response.data
+            logger.info(f"📊 Buscando histórico a partir de: {dois_dias_atras}")
             
-            if not canais:
-                return []
+            query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
             
-            canal_ids = [c["id"] for c in canais]
+            if nicho:
+                query = query.eq("nicho", nicho)
+            if subnicho:
+                query = query.eq("subnicho", subnicho)
+            if lingua:
+                query = query.eq("lingua", lingua)
+            if tipo:
+                query = query.eq("tipo", tipo)
             
-            hoje = datetime.now(timezone.utc).date()
-            data_30d_atras = (hoje - timedelta(days=30)).isoformat()
-            data_15d_atras = (hoje - timedelta(days=15)).isoformat()
-            data_7d_atras = (hoje - timedelta(days=7)).isoformat()
+            canais_response = query.execute()
             
-            historico_response = self.supabase.table("dados_canais_historico").select("*").in_("canal_id", canal_ids).gte("data_coleta", data_30d_atras).execute()
+            # 🔧 BUSCAR APENAS HISTÓRICO RECENTE (últimos 2 dias)
+            historico_response = self.supabase.table("dados_canais_historico")\
+                .select("*")\
+                .gte("data_coleta", dois_dias_atras)\
+                .execute()
             
+            logger.info(f"📊 Histórico carregado: {len(historico_response.data)} linhas (otimizado)")
+            
+            # 🔧 Pegar o MAIS RECENTE de cada canal (ordenando por data DESC)
             historico_dict = {}
             for h in historico_response.data:
                 canal_id = h["canal_id"]
@@ -265,51 +280,60 @@ class SupabaseClient:
                 if canal_id not in historico_dict:
                     historico_dict[canal_id] = h
                 elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
+                    # 🔧 SEMPRE pega o mais recente
                     historico_dict[canal_id] = h
             
-            for canal in canais:
-                canal_id = canal["id"]
-                dados = historico_dict.get(canal_id, {})
-                
-                canal["views_30d"] = dados.get("views_30d", 0)
-                canal["views_15d"] = dados.get("views_15d", 0)
-                canal["views_7d"] = dados.get("views_7d", 0)
-                canal["inscritos"] = dados.get("inscritos", 0)
-                canal["videos_publicados_7d"] = dados.get("videos_publicados_7d", 0)
-                canal["engagement_rate"] = dados.get("engagement_rate", 0.0)
-                
-                views_7d = canal.get("views_7d", 0)
-                inscritos = canal.get("inscritos", 1)
-                videos_7d = canal.get("videos_publicados_7d", 0)
-                
-                if inscritos > 0:
-                    views_per_sub = views_7d / inscritos
-                else:
-                    views_per_sub = 0
-                
-                engagement = canal.get("engagement_rate", 0)
-                
-                score = (views_per_sub * 50) + (engagement * 30) + (videos_7d * 10)
-                canal["score_calculado"] = round(score, 2)
-                
-                views_30d = canal.get("views_30d", 0)
-                views_7d_val = canal.get("views_7d", 0)
-                
-                if views_30d > 0:
-                    growth = ((views_7d_val / (views_30d / 4.28)) - 1) * 100
-                else:
-                    growth = 0
-                
-                canal["growth_7d"] = round(growth, 2)
+            logger.info(f"📊 Canais com histórico: {len(historico_dict)}")
             
-            if nicho:
-                canais = [c for c in canais if c.get("nicho") == nicho]
-            if subnicho:
-                canais = [c for c in canais if c.get("subnicho") == subnicho]
-            if lingua:
-                canais = [c for c in canais if c.get("lingua") == lingua]
-            if tipo:
-                canais = [c for c in canais if c.get("tipo") == tipo]
+            canais = []
+            for item in canais_response.data:
+                canal = {
+                    "id": item["id"],
+                    "nome_canal": item["nome_canal"],
+                    "url_canal": item["url_canal"],
+                    "nicho": item["nicho"],
+                    "subnicho": item["subnicho"],
+                    "lingua": item.get("lingua", "N/A"),
+                    "tipo": item.get("tipo", "minerado"),
+                    "status": item["status"],
+                    "ultima_coleta": item.get("ultima_coleta"),
+                    "views_30d": 0,
+                    "views_15d": 0,
+                    "views_7d": 0,
+                    "inscritos": 0,
+                    "engagement_rate": 0.0,
+                    "videos_publicados_7d": 0,
+                    "score_calculado": 0,
+                    "growth_30d": 0,
+                    "growth_7d": 0
+                }
+                
+                # 🔧 Se tem histórico recente, usa ele
+                if item["id"] in historico_dict:
+                    h = historico_dict[item["id"]]
+                    
+                    canal["views_30d"] = h.get("views_30d", 0)
+                    canal["views_15d"] = h.get("views_15d", 0)
+                    canal["views_7d"] = h.get("views_7d", 0)
+                    canal["inscritos"] = h.get("inscritos", 0)
+                    canal["engagement_rate"] = h.get("engagement_rate", 0.0)
+                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
+                    
+                    # Calcular score
+                    if canal["inscritos"] > 0:
+                        score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
+                        canal["score_calculado"] = round(score, 2)
+                    
+                    # Calcular growth 7d
+                    if canal["views_7d"] > 0 and canal["views_15d"] > 0:
+                        views_anterior_7d = canal["views_15d"] - canal["views_7d"]
+                        if views_anterior_7d > 0:
+                            growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
+                            canal["growth_7d"] = round(growth, 2)
+                
+                canais.append(canal)
+            
+            # Aplicar filtros numéricos
             if views_30d_min:
                 canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
             if views_15d_min:
@@ -321,6 +345,7 @@ class SupabaseClient:
             if growth_min:
                 canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
             
+            # Ordenar por score
             canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
             
             logger.info(f"✅ Retornando {len(canais)} canais filtrados")
@@ -383,7 +408,7 @@ class SupabaseClient:
             import traceback
             logger.error(traceback.format_exc())
             raise
-
+            
     async def get_filter_options(self) -> Dict[str, List]:
         try:
             nichos_response = self.supabase.table("canais_monitorados").select("nicho").execute()
@@ -533,6 +558,7 @@ class SupabaseClient:
             
             notificacoes = response.data
             
+            # ✅ MANTIDO: Buscar data_publicacao dos vídeos (estava funcionando!)
             video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
             
             if video_ids:
@@ -577,6 +603,7 @@ class SupabaseClient:
             
             notificacoes = response.data
             
+            # ✅ MANTIDO: Buscar data_publicacao dos vídeos (estava funcionando!)
             video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
             
             if video_ids:
@@ -663,7 +690,7 @@ class SupabaseClient:
                 "hoje": 0,
                 "esta_semana": 0
             }
-    
+            
     async def get_regras_notificacoes(self) -> List[Dict]:
         try:
             response = self.supabase.table("regras_notificacoes").select("*").order("views_minimas", desc=False).execute()

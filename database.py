@@ -58,12 +58,11 @@ class SupabaseClient:
         try:
             data_coleta = datetime.now(timezone.utc).date().isoformat()
             
-            views_60d = data.get("views_60d", 0)
             views_30d = data.get("views_30d", 0)
             views_15d = data.get("views_15d", 0)
             views_7d = data.get("views_7d", 0)
             
-            if views_60d == 0 and views_30d == 0 and views_15d == 0 and views_7d == 0:
+            if views_30d == 0 and views_15d == 0 and views_7d == 0:
                 logger.warning(f"Skipping save for canal_id {canal_id} - all views zero")
                 return None
             
@@ -167,13 +166,11 @@ class SupabaseClient:
             data_inicio_response = self.supabase.table("coletas_historico").select("data_inicio").eq("id", coleta_id).execute()
             
             if data_inicio_response.data:
-                data_inicio_str = data_inicio_response.data[0]["data_inicio"]
-                data_inicio = datetime.fromisoformat(data_inicio_str.replace('Z', '+00:00'))
+                data_inicio = datetime.fromisoformat(data_inicio_response.data[0]["data_inicio"].replace('Z', '+00:00'))
                 data_fim = datetime.now(timezone.utc)
-                
-                duracao_segundos = int((data_fim - data_inicio).total_seconds())
+                duracao = int((data_fim - data_inicio).total_seconds())
             else:
-                duracao_segundos = 0
+                duracao = 0
             
             update_data = {
                 "data_fim": datetime.now(timezone.utc).isoformat(),
@@ -181,7 +178,7 @@ class SupabaseClient:
                 "canais_sucesso": canais_sucesso,
                 "canais_erro": canais_erro,
                 "videos_coletados": videos_coletados,
-                "duracao_segundos": duracao_segundos,
+                "duracao_segundos": duracao,
                 "requisicoes_usadas": requisicoes_usadas
             }
             
@@ -189,6 +186,7 @@ class SupabaseClient:
                 update_data["mensagem_erro"] = mensagem_erro
             
             response = self.supabase.table("coletas_historico").update(update_data).eq("id", coleta_id).execute()
+            
             return response.data
         except Exception as e:
             logger.error(f"Error updating coleta log: {e}")
@@ -197,38 +195,25 @@ class SupabaseClient:
     async def get_coletas_historico(self, limit: int = 20) -> List[Dict]:
         try:
             response = self.supabase.table("coletas_historico").select("*").order("data_inicio", desc=True).limit(limit).execute()
-            return response.data
+            return response.data if response.data else []
         except Exception as e:
             logger.error(f"Error fetching coletas historico: {e}")
             raise
 
-    async def get_quota_diaria_usada(self) -> int:
-        """Get total requests used today across all collections"""
+    async def cleanup_stuck_collections(self) -> int:
         try:
-            hoje = datetime.now(timezone.utc).date().isoformat()
+            uma_hora_atras = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
             
-            response = self.supabase.table("coletas_historico").select("requisicoes_usadas").gte("data_inicio", hoje).execute()
+            response = self.supabase.table("coletas_historico").update({
+                "status": "erro",
+                "mensagem_erro": "Coleta travada - marcada como erro automaticamente"
+            }).eq("status", "em_progresso").lt("data_inicio", uma_hora_atras).execute()
             
-            total = sum(coleta.get("requisicoes_usadas", 0) for coleta in response.data)
-            return total
-        except Exception as e:
-            logger.error(f"Error getting quota usage: {e}")
-            return 0
-
-    async def cleanup_stuck_collections(self):
-        try:
-            timeout_threshold = (datetime.now(timezone.utc) - timedelta(minutes=60)).isoformat()
-            stuck_collections = self.supabase.table("coletas_historico").select("*").eq("status", "em_progresso").lt("data_inicio", timeout_threshold).execute()
+            count = len(response.data) if response.data else 0
+            if count > 0:
+                logger.info(f"Cleaned up {count} stuck collections")
             
-            if stuck_collections.data:
-                for coleta in stuck_collections.data:
-                    self.supabase.table("coletas_historico").update({
-                        "status": "erro",
-                        "data_fim": datetime.now(timezone.utc).isoformat(),
-                        "mensagem_erro": "Coleta travada - timeout de 60 minutos excedido"
-                    }).eq("id", coleta["id"]).execute()
-            
-            return len(stuck_collections.data) if stuck_collections.data else 0
+            return count
         except Exception as e:
             logger.error(f"Error cleaning up stuck collections: {e}")
             return 0
@@ -236,44 +221,42 @@ class SupabaseClient:
     async def delete_coleta(self, coleta_id: int):
         try:
             response = self.supabase.table("coletas_historico").delete().eq("id", coleta_id).execute()
-            return True
+            return response.data
         except Exception as e:
             logger.error(f"Error deleting coleta: {e}")
             raise
 
-    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
-        """
-        🆕 VERSÃO OTIMIZADA - Busca apenas histórico dos últimos 2 dias
-        Isso garante dados SEMPRE atualizados e evita carregar milhares de linhas antigas
-        """
+    async def get_quota_diaria_usada(self) -> int:
         try:
-            # 🆕 OTIMIZAÇÃO CRÍTICA: Buscar apenas historico dos últimos 2 dias
-            dois_dias_atras = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
+            hoje = datetime.now(timezone.utc).date().isoformat()
             
-            logger.info(f"📊 Buscando histórico a partir de: {dois_dias_atras}")
+            response = self.supabase.table("coletas_historico").select("requisicoes_usadas").gte("data_inicio", hoje).execute()
             
-            query = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo")
+            total = sum(coleta.get("requisicoes_usadas", 0) for coleta in response.data)
             
-            if nicho:
-                query = query.eq("nicho", nicho)
-            if subnicho:
-                query = query.eq("subnicho", subnicho)
-            if lingua:
-                query = query.eq("lingua", lingua)
-            if tipo:
-                query = query.eq("tipo", tipo)
+            return total
+        except Exception as e:
+            logger.error(f"Error getting daily quota: {e}")
+            return 0
+
+    async def get_canais_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, tipo: Optional[str] = None, views_30d_min: Optional[int] = None, views_15d_min: Optional[int] = None, views_7d_min: Optional[int] = None, score_min: Optional[float] = None, growth_min: Optional[float] = None, limit: int = 500, offset: int = 0) -> List[Dict]:
+        try:
+            response = self.supabase.table("canais_monitorados").select("*").eq("status", "ativo").execute()
             
-            canais_response = query.execute()
+            canais = response.data
             
-            # 🆕 BUSCAR APENAS HISTÓRICO RECENTE (últimos 2 dias)
-            historico_response = self.supabase.table("dados_canais_historico")\
-                .select("*")\
-                .gte("data_coleta", dois_dias_atras)\
-                .execute()
+            if not canais:
+                return []
             
-            logger.info(f"📊 Histórico carregado: {len(historico_response.data)} linhas (otimizado)")
+            canal_ids = [c["id"] for c in canais]
             
-            # 🆕 Pegar o MAIS RECENTE de cada canal (ordenando por data DESC)
+            hoje = datetime.now(timezone.utc).date()
+            data_30d_atras = (hoje - timedelta(days=30)).isoformat()
+            data_15d_atras = (hoje - timedelta(days=15)).isoformat()
+            data_7d_atras = (hoje - timedelta(days=7)).isoformat()
+            
+            historico_response = self.supabase.table("dados_canais_historico").select("*").in_("canal_id", canal_ids).gte("data_coleta", data_30d_atras).execute()
+            
             historico_dict = {}
             for h in historico_response.data:
                 canal_id = h["canal_id"]
@@ -282,60 +265,51 @@ class SupabaseClient:
                 if canal_id not in historico_dict:
                     historico_dict[canal_id] = h
                 elif data_coleta > historico_dict[canal_id].get("data_coleta", ""):
-                    # 🆕 SEMPRE pega o mais recente
                     historico_dict[canal_id] = h
             
-            logger.info(f"📊 Canais com histórico: {len(historico_dict)}")
-            
-            canais = []
-            for item in canais_response.data:
-                canal = {
-                    "id": item["id"],
-                    "nome_canal": item["nome_canal"],
-                    "url_canal": item["url_canal"],
-                    "nicho": item["nicho"],
-                    "subnicho": item["subnicho"],
-                    "lingua": item.get("lingua", "N/A"),
-                    "tipo": item.get("tipo", "minerado"),
-                    "status": item["status"],
-                    "ultima_coleta": item.get("ultima_coleta"),
-                    "views_30d": 0,
-                    "views_15d": 0,
-                    "views_7d": 0,
-                    "inscritos": 0,
-                    "engagement_rate": 0.0,
-                    "videos_publicados_7d": 0,
-                    "score_calculado": 0,
-                    "growth_30d": 0,
-                    "growth_7d": 0
-                }
+            for canal in canais:
+                canal_id = canal["id"]
+                dados = historico_dict.get(canal_id, {})
                 
-                # 🆕 Se tem histórico recente, usa ele
-                if item["id"] in historico_dict:
-                    h = historico_dict[item["id"]]
-                    
-                    canal["views_30d"] = h.get("views_30d", 0)
-                    canal["views_15d"] = h.get("views_15d", 0)
-                    canal["views_7d"] = h.get("views_7d", 0)
-                    canal["inscritos"] = h.get("inscritos", 0)
-                    canal["engagement_rate"] = h.get("engagement_rate", 0.0)
-                    canal["videos_publicados_7d"] = h.get("videos_publicados_7d", 0)
-                    
-                    # Calcular score
-                    if canal["inscritos"] > 0:
-                        score = ((canal["views_30d"] / canal["inscritos"]) * 0.7) + ((canal["views_7d"] / canal["inscritos"]) * 0.3)
-                        canal["score_calculado"] = round(score, 2)
-                    
-                    # Calcular growth 7d
-                    if canal["views_7d"] > 0 and canal["views_15d"] > 0:
-                        views_anterior_7d = canal["views_15d"] - canal["views_7d"]
-                        if views_anterior_7d > 0:
-                            growth = ((canal["views_7d"] - views_anterior_7d) / views_anterior_7d) * 100
-                            canal["growth_7d"] = round(growth, 2)
+                canal["views_30d"] = dados.get("views_30d", 0)
+                canal["views_15d"] = dados.get("views_15d", 0)
+                canal["views_7d"] = dados.get("views_7d", 0)
+                canal["inscritos"] = dados.get("inscritos", 0)
+                canal["videos_publicados_7d"] = dados.get("videos_publicados_7d", 0)
+                canal["engagement_rate"] = dados.get("engagement_rate", 0.0)
                 
-                canais.append(canal)
+                views_7d = canal.get("views_7d", 0)
+                inscritos = canal.get("inscritos", 1)
+                videos_7d = canal.get("videos_publicados_7d", 0)
+                
+                if inscritos > 0:
+                    views_per_sub = views_7d / inscritos
+                else:
+                    views_per_sub = 0
+                
+                engagement = canal.get("engagement_rate", 0)
+                
+                score = (views_per_sub * 50) + (engagement * 30) + (videos_7d * 10)
+                canal["score_calculado"] = round(score, 2)
+                
+                views_30d = canal.get("views_30d", 0)
+                views_7d_val = canal.get("views_7d", 0)
+                
+                if views_30d > 0:
+                    growth = ((views_7d_val / (views_30d / 4.28)) - 1) * 100
+                else:
+                    growth = 0
+                
+                canal["growth_7d"] = round(growth, 2)
             
-            # Aplicar filtros numéricos
+            if nicho:
+                canais = [c for c in canais if c.get("nicho") == nicho]
+            if subnicho:
+                canais = [c for c in canais if c.get("subnicho") == subnicho]
+            if lingua:
+                canais = [c for c in canais if c.get("lingua") == lingua]
+            if tipo:
+                canais = [c for c in canais if c.get("tipo") == tipo]
             if views_30d_min:
                 canais = [c for c in canais if c.get("views_30d", 0) >= views_30d_min]
             if views_15d_min:
@@ -347,7 +321,6 @@ class SupabaseClient:
             if growth_min:
                 canais = [c for c in canais if c.get("growth_7d", 0) >= growth_min]
             
-            # Ordenar por score
             canais.sort(key=lambda x: x.get("score_calculado", 0), reverse=True)
             
             logger.info(f"✅ Retornando {len(canais)} canais filtrados")
@@ -360,10 +333,10 @@ class SupabaseClient:
             logger.error(traceback.format_exc())
             raise
 
-    async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "60d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 500, offset: int = 0) -> List[Dict]:
+    async def get_videos_with_filters(self, nicho: Optional[str] = None, subnicho: Optional[str] = None, lingua: Optional[str] = None, canal: Optional[str] = None, periodo_publicacao: str = "30d", views_min: Optional[int] = None, growth_min: Optional[float] = None, order_by: str = "views_atuais", limit: int = 500, offset: int = 0) -> List[Dict]:
         try:
-            days_map = {"60d": 60, "30d": 30, "15d": 15, "7d": 7}
-            days = days_map.get(periodo_publicacao, 60)
+            days_map = {"30d": 30, "15d": 15, "7d": 7}
+            days = days_map.get(periodo_publicacao, 30)
             cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             
             all_videos_response = self.supabase.table("videos_historico").select("*").gte("data_publicacao", cutoff_date).execute()
@@ -550,96 +523,87 @@ class SupabaseClient:
             raise
 
     async def get_notificacoes_nao_vistas(self) -> List[Dict]:
-    try:
-        # Buscar notificações não vistas
-        response = self.supabase.table("notificacoes").select(
-            "*, canais_monitorados!inner(subnicho)"
-        ).eq("vista", False).order("data_disparo", desc=True).execute()
-        
-        if not response.data:
-            return []
-        
-        notificacoes = response.data
-        
-        # Buscar dados dos vídeos (incluindo data_publicacao)
-        video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
-        
-        if video_ids:
-            videos_response = self.supabase.table("videos_historico").select(
-                "video_id, data_publicacao"
-            ).in_("video_id", video_ids).execute()
+        try:
+            response = self.supabase.table("notificacoes").select(
+                "*, canais_monitorados!inner(subnicho)"
+            ).eq("vista", False).order("data_disparo", desc=True).execute()
             
-            # Criar dicionário de video_id -> data_publicacao
-            videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+            if not response.data:
+                return []
             
-            # Adicionar data_publicacao em cada notificação
+            notificacoes = response.data
+            
+            video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
+            
+            if video_ids:
+                videos_response = self.supabase.table("videos_historico").select(
+                    "video_id, data_publicacao"
+                ).in_("video_id", video_ids).execute()
+                
+                videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+                
+                for notif in notificacoes:
+                    video_id = notif.get("video_id")
+                    if video_id and video_id in videos_dict:
+                        notif["data_publicacao"] = videos_dict[video_id]
+                    else:
+                        notif["data_publicacao"] = None
+            
             for notif in notificacoes:
-                video_id = notif.get("video_id")
-                if video_id and video_id in videos_dict:
-                    notif["data_publicacao"] = videos_dict[video_id]
+                if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                    notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
                 else:
-                    notif["data_publicacao"] = None
-        
-        # Processar subnicho
-        for notif in notificacoes:
-            if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
-                notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
-            else:
-                notif["subnicho"] = None
-            notif.pop("canais_monitorados", None)
-        
-        return notificacoes
-    except Exception as e:
-        logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
-        return []
+                    notif["subnicho"] = None
+                notif.pop("canais_monitorados", None)
+            
+            return notificacoes
+        except Exception as e:
+            logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
+            return []
     
     async def get_notificacoes_all(self, limit: int = 50, offset: int = 0, vista_filter: Optional[bool] = None) -> List[Dict]:
-    try:
-        query = self.supabase.table("notificacoes").select(
-            "*, canais_monitorados(subnicho)"
-        )
-        
-        if vista_filter is not None:
-            query = query.eq("vista", vista_filter)
-        
-        response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
-        
-        if not response.data:
-            return []
-        
-        notificacoes = response.data
-        
-        # Buscar dados dos vídeos (incluindo data_publicacao)
-        video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
-        
-        if video_ids:
-            videos_response = self.supabase.table("videos_historico").select(
-                "video_id, data_publicacao"
-            ).in_("video_id", video_ids).execute()
+        try:
+            query = self.supabase.table("notificacoes").select(
+                "*, canais_monitorados(subnicho)"
+            )
             
-            # Criar dicionário de video_id -> data_publicacao
-            videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+            if vista_filter is not None:
+                query = query.eq("vista", vista_filter)
             
-            # Adicionar data_publicacao em cada notificação
+            response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
+            
+            if not response.data:
+                return []
+            
+            notificacoes = response.data
+            
+            video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
+            
+            if video_ids:
+                videos_response = self.supabase.table("videos_historico").select(
+                    "video_id, data_publicacao"
+                ).in_("video_id", video_ids).execute()
+                
+                videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
+                
+                for notif in notificacoes:
+                    video_id = notif.get("video_id")
+                    if video_id and video_id in videos_dict:
+                        notif["data_publicacao"] = videos_dict[video_id]
+                    else:
+                        notif["data_publicacao"] = None
+            
             for notif in notificacoes:
-                video_id = notif.get("video_id")
-                if video_id and video_id in videos_dict:
-                    notif["data_publicacao"] = videos_dict[video_id]
+                if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
+                    notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
                 else:
-                    notif["data_publicacao"] = None
-        
-        # Processar subnicho
-        for notif in notificacoes:
-            if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
-                notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
-            else:
-                notif["subnicho"] = None
-            notif.pop("canais_monitorados", None)
-        
-        return notificacoes
-    except Exception as e:
-        logger.error(f"Erro ao buscar notificacoes: {e}")
-        return []
+                    notif["subnicho"] = None
+                notif.pop("canais_monitorados", None)
+            
+            return notificacoes
+        except Exception as e:
+            logger.error(f"Erro ao buscar notificacoes: {e}")
+            return []
     
     async def marcar_notificacao_vista(self, notif_id: int) -> bool:
         try:
@@ -709,9 +673,7 @@ class SupabaseClient:
             return []
     
     async def create_regra_notificacao(self, regra_data: Dict) -> Optional[Dict]:
-        """Cria nova regra de notificação - SUPORTA MÚLTIPLOS SUBNICHOS"""
         try:
-            # 🆕 Converter subnichos para formato correto
             if 'subnichos' in regra_data:
                 if regra_data['subnichos'] is None or (isinstance(regra_data['subnichos'], list) and len(regra_data['subnichos']) == 0):
                     regra_data['subnichos'] = None
@@ -729,9 +691,7 @@ class SupabaseClient:
             return None
     
     async def update_regra_notificacao(self, regra_id: int, regra_data: Dict) -> Optional[Dict]:
-        """Atualiza regra de notificação existente - SUPORTA MÚLTIPLOS SUBNICHOS"""
         try:
-            # 🆕 Converter subnichos para formato correto
             if 'subnichos' in regra_data:
                 if regra_data['subnichos'] is None or (isinstance(regra_data['subnichos'], list) and len(regra_data['subnichos']) == 0):
                     regra_data['subnichos'] = None
@@ -775,7 +735,6 @@ class SupabaseClient:
             return None
 
     async def get_cached_transcription(self, video_id: str):
-        """Busca transcrição no cache"""
         try:
             response = self.supabase.table("transcriptions").select("*").eq("video_id", video_id).execute()
             
@@ -790,7 +749,6 @@ class SupabaseClient:
             return None
     
     async def save_transcription_cache(self, video_id: str, transcription: str):
-        """Salva transcrição no cache"""
         try:
             data = {
                 "video_id": video_id,

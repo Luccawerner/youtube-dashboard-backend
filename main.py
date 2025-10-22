@@ -985,7 +985,7 @@ async def run_collection_job():
                 canais_sucesso=canais_sucesso,
                 canais_erro=canais_erro,
                 videos_coletados=videos_total,
-                requisicoes_usadas=collector.total_quota_units if hasattr(collector, 'total_quota_units') else 0
+                requisicoes_usadas=collector.total_quota_units if hasattr(collector, 'total_quota_units') else 0,
                 mensagem_erro=str(e)
             )
         

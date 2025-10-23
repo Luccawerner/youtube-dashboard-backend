@@ -588,7 +588,7 @@ class SupabaseClient:
             return []
     
     async def get_notificacoes_all(self, limit: int = 500, offset: int = 0, vista_filter: Optional[bool] = None, dias: Optional[int] = 30) -> List[Dict]:
-    try:
+        try:
         query = self.supabase.table("notificacoes").select(
             "*, canais_monitorados(subnicho)"
         )

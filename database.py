@@ -547,18 +547,26 @@ class SupabaseClient:
             logger.error(f"Error deleting canal permanently: {e}")
             raise
 
-    async def get_notificacoes_nao_vistas(self) -> List[Dict]:
+    async def get_notificacoes_all(self, limit: int = 500, offset: int = 0, vista_filter: Optional[bool] = None, dias: Optional[int] = 30) -> List[Dict]:
         try:
-            response = self.supabase.table("notificacoes").select(
-                "*, canais_monitorados!inner(subnicho)"
-            ).eq("vista", False).order("data_disparo", desc=True).execute()
+            query = self.supabase.table("notificacoes").select(
+                "*, canais_monitorados(subnicho)"
+            )
+            
+            if dias is not None:
+                data_limite = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+                query = query.gte("data_disparo", data_limite)
+            
+            if vista_filter is not None:
+                query = query.eq("vista", vista_filter)
+            
+            response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
             
             if not response.data:
                 return []
             
             notificacoes = response.data
             
-            # ✅ MANTIDO: Buscar data_publicacao dos vídeos (estava funcionando!)
             video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
             
             if video_ids:
@@ -584,57 +592,8 @@ class SupabaseClient:
             
             return notificacoes
         except Exception as e:
-            logger.error(f"Erro ao buscar notificacoes nao vistas: {e}")
+            logger.error(f"Erro ao buscar notificacoes: {e}")
             return []
-    
-    async def get_notificacoes_all(self, limit: int = 500, offset: int = 0, vista_filter: Optional[bool] = None, dias: Optional[int] = 30) -> List[Dict]:
-        try:
-        query = self.supabase.table("notificacoes").select(
-            "*, canais_monitorados(subnicho)"
-        )
-        
-        if dias is not None:
-            data_limite = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
-            query = query.gte("data_disparo", data_limite)
-        
-        if vista_filter is not None:
-            query = query.eq("vista", vista_filter)
-        
-        response = query.order("data_disparo", desc=True).range(offset, offset + limit - 1).execute()
-        
-        if not response.data:
-            return []
-        
-        notificacoes = response.data
-        
-        # ✅ MANTIDO: Buscar data_publicacao dos vídeos (estava funcionando!)
-        video_ids = [n["video_id"] for n in notificacoes if n.get("video_id")]
-        
-        if video_ids:
-            videos_response = self.supabase.table("videos_historico").select(
-                "video_id, data_publicacao"
-            ).in_("video_id", video_ids).execute()
-            
-            videos_dict = {v["video_id"]: v["data_publicacao"] for v in videos_response.data}
-            
-            for notif in notificacoes:
-                video_id = notif.get("video_id")
-                if video_id and video_id in videos_dict:
-                    notif["data_publicacao"] = videos_dict[video_id]
-                else:
-                    notif["data_publicacao"] = None
-        
-        for notif in notificacoes:
-            if notif.get("canais_monitorados") and notif["canais_monitorados"].get("subnicho"):
-                notif["subnicho"] = notif["canais_monitorados"]["subnicho"]
-            else:
-                notif["subnicho"] = None
-            notif.pop("canais_monitorados", None)
-        
-        return notificacoes
-    except Exception as e:
-        logger.error(f"Erro ao buscar notificacoes: {e}")
-        return []
     
     async def marcar_notificacao_vista(self, notif_id: int) -> bool:
         try:

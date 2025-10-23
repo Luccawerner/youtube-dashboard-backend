@@ -257,6 +257,7 @@ class NotificationChecker:
                 'periodo_dias': regra['periodo_dias'],
                 'tipo_alerta': tipo_alerta,
                 'mensagem': mensagem,
+                'tipo_canal': video.get('tipo_canal', 'minerado'),
                 'data_disparo': datetime.now(timezone.utc).isoformat()
             }
             
@@ -313,6 +314,7 @@ class NotificationChecker:
                         'titulo': item['titulo'],
                         'canal_id': item['canal_id'],
                         'nome_canal': canal_info.get('nome_canal', 'Unknown'),
+                        'tipo_canal': canal_info.get('tipo', 'minerado'),
                         'views_atuais': item['views_atuais'],
                         'data_publicacao': item['data_publicacao']
                     })
@@ -348,6 +350,7 @@ class NotificationChecker:
                 'canal_id': video['canal_id'],
                 'nome_video': video['titulo'],
                 'nome_canal': video['nome_canal'],
+                'tipo_canal': video.get('tipo_canal', 'minerado'),
                 'views_atingidas': video['views_atuais'],
                 'periodo_dias': regra['periodo_dias'],
                 'tipo_alerta': tipo_alerta,

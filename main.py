@@ -633,7 +633,7 @@ async def remove_favorito(tipo: str, item_id: int):
     try:
         if tipo not in ["canal", "video"]:
             raise HTTPException(status_code=400, detail="Tipo deve ser 'canal' ou 'video'")
-        
+
         await db.remove_favorito(tipo, item_id)
         return {"message": "Favorito removido com sucesso"}
     except Exception as e:

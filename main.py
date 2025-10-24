@@ -529,6 +529,36 @@ async def collect_data(background_tasks: BackgroundTasks):
         logger.error(f"Error starting collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ⬇️⬇️⬇️ ADICIONE ESTE BLOCO AQUI ⬇️⬇️⬇️
+@app.post("/api/force-notifier")
+async def force_notifier():
+    """
+    Força execução do notifier manualmente.
+    Útil para: testes, debug, ou recuperar notificações perdidas.
+    """
+    try:
+        logger.info("🔔 FORÇANDO EXECUÇÃO DO NOTIFIER (manual)")
+        
+        # Importar e executar o notifier
+        from notifier import NotificationChecker
+        
+        checker = NotificationChecker(db.supabase)
+        await checker.check_and_create_notifications()
+        
+        logger.info("✅ Notifier executado com sucesso!")
+        
+        return {
+            "status": "success",
+            "message": "Notificador executado com sucesso! Verifique as notificações."
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Erro ao executar notifier: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+# ⬆️⬆️⬆️ ATÉ AQUI ⬆️⬆️⬆️
+
 @app.get("/api/stats")
 async def get_stats():
     try:

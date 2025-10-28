@@ -758,6 +758,9 @@ async def get_notificacoes_historico(limit: Optional[int] = 100):
 
 @app.put("/api/notificacoes/{notif_id}/marcar-vista")
 async def marcar_notificacao_vista(notif_id: int):
+    """
+    Marca uma notificação como vista.
+    """
     try:
         success = await db.marcar_notificacao_vista(notif_id)
         
@@ -772,6 +775,32 @@ async def marcar_notificacao_vista(notif_id: int):
         raise
     except Exception as e:
         logger.error(f"Error marking notificacao as vista: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/notificacoes/{notif_id}/desmarcar-vista")
+async def desmarcar_notificacao_vista(notif_id: int):
+    """
+    Desmarca uma notificação como vista (volta para não vista).
+    Útil quando usuário marca por engano.
+    """
+    try:
+        logger.info(f"🔄 Desmarcando notificação {notif_id} como não vista")
+        
+        success = await db.desmarcar_notificacao_vista(notif_id)
+        
+        if success:
+            logger.info(f"✅ Notificação {notif_id} desmarcada com sucesso")
+            return {
+                "message": "Notificação desmarcada como vista",
+                "notif_id": notif_id
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Notificação não encontrada")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro ao desmarcar notificação: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/notificacoes/marcar-todas")

@@ -596,6 +596,9 @@ class SupabaseClient:
             return []
     
     async def marcar_notificacao_vista(self, notif_id: int) -> bool:
+        """
+        Marca uma notificação como vista.
+        """
         try:
             response = self.supabase.table("notificacoes").update({
                 "vista": True,
@@ -607,7 +610,32 @@ class SupabaseClient:
             logger.error(f"Erro ao marcar notificacao como vista: {e}")
             return False
     
+    async def desmarcar_notificacao_vista(self, notif_id: int) -> bool:
+        """
+        Desmarca uma notificação como vista (volta para não vista).
+        Útil quando usuário marca por engano.
+        
+        Args:
+            notif_id: ID da notificação
+            
+        Returns:
+            bool: True se sucesso, False se notificação não encontrada
+        """
+        try:
+            response = self.supabase.table("notificacoes").update({
+                "vista": False,
+                "data_vista": None
+            }).eq("id", notif_id).execute()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao desmarcar notificacao como vista: {e}")
+            return False
+    
     async def marcar_todas_notificacoes_vistas(self) -> int:
+        """
+        Marca todas as notificações não vistas como vistas.
+        """
         try:
             response = self.supabase.table("notificacoes").update({
                 "vista": True,

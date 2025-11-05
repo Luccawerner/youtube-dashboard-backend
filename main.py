@@ -1,13 +1,3 @@
-from dotenv import load_dotenv
-import os
-
-# Carrega variáveis do .env
-load_dotenv()
-
-# Debug: verifica se carregou
-print(f"SUPABASE_URL carregada: {os.getenv('SUPABASE_URL')[:30] if os.getenv('SUPABASE_URL') else 'NÃO ENCONTRADA'}")
-print(f"SUPABASE_KEY carregada: {'SIM' if os.getenv('SUPABASE_KEY') else 'NÃO'}")
-
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -931,6 +921,10 @@ async def toggle_regra_notificacao(regra_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error toggling regra: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =========================================================================
 # ANALYSIS TAB - New Endpoints
 # Added by Claude Code - 2024-11-05
@@ -938,240 +932,221 @@ async def toggle_regra_notificacao(regra_id: int):
 
 @app.get("/api/analysis/keywords")
 async def get_keywords_analysis(days: int = 30):
-    """
-    Retorna top 20 keywords dos últimos X dias
-
-    Query params:
-        days: 7, 15 ou 30 (padrão: 30)
-    """
+    """Retorna top 20 keywords dos últimos X dias"""
     try:
         if days not in [7, 15, 30]:
             raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
-
         keywords = await db.get_keyword_analysis(period_days=days)
-
-        return {
-            "period_days": days,
-            "total": len(keywords),
-            "keywords": keywords
-        }
+        return {"period_days": days, "total": len(keywords), "keywords": keywords}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting keywords analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/analysis/title-patterns")
 async def get_title_patterns_analysis(subniche: str, days: int = 30):
-    """
-    Retorna top 5 padrões de título por subniche
-
-    Query params:
-        subniche: Nome do subniche (obrigatório)
-        days: 7, 15 ou 30 (padrão: 30)
-    """
+    """Retorna top 5 padrões de título por subniche"""
     try:
         if days not in [7, 15, 30]:
             raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
-
         patterns = await db.get_title_patterns(subniche=subniche, period_days=days)
-
-        return {
-            "subniche": subniche,
-            "period_days": days,
-            "total": len(patterns),
-            "patterns": patterns
-        }
+        return {"subniche": subniche, "period_days": days, "total": len(patterns), "patterns": patterns}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting title patterns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/analysis/top-channels")
 async def get_top_channels_analysis(subniche: str):
-    """
-    Retorna top 5 canais por subniche (últimos 30 dias)
-
-    Query params:
-        subniche: Nome do subniche (obrigatório)
-    """
+    """Retorna top 5 canais por subniche (últimos 30 dias)"""
     try:
         channels = await db.get_top_channels_snapshot(subniche=subniche)
-
-        return {
-            "subniche": subniche,
-            "total": len(channels),
-            "channels": channels
-        }
+        return {"subniche": subniche, "total": len(channels), "channels": channels}
     except Exception as e:
         logger.error(f"Error getting top channels: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/analysis/subniches")
 async def get_all_subniches():
     """Retorna lista de todos os subniches ativos"""
     try:
         subniches = await db.get_all_subniches()
-
-        return {
-            "total": len(subniches),
-            "subniches": subniches
-        }
+        return {"total": len(subniches), "subniches": subniches}
     except Exception as e:
         logger.error(f"Error getting subniches: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# =========================================================================
-# WEEKLY REPORTS - New Endpoints
-# =========================================================================
 
 @app.get("/api/reports/weekly/latest")
 async def get_latest_weekly_report():
     """Retorna o relatório semanal mais recente"""
     try:
         report = await db.get_weekly_report_latest()
-
         if report:
             return report
         else:
-            raise HTTPException(
-                status_code=404,
-                detail="Nenhum relatório encontrado. Execute /api/reports/weekly/generate primeiro."
-            )
+            raise HTTPException(status_code=404, detail="Nenhum relatório encontrado")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting weekly report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/reports/weekly/generate")
 async def generate_weekly_report_endpoint():
-    """
-    Força a geração de um novo relatório semanal
-
-    ATENÇÃO: Processo pode levar alguns minutos
-    """
+    """Força a geração de um novo relatório semanal"""
     try:
         from report_generator import ReportGenerator
-
         logger.info("🔄 Starting weekly report generation...")
-
         generator = ReportGenerator(db.supabase)
         report = generator.generate_weekly_report()
-
         logger.info("✅ Weekly report generated successfully")
-
-        return {
-            "message": "Relatório gerado com sucesso",
-            "report": report
-        }
+        return {"message": "Relatório gerado com sucesso", "report": report}
     except Exception as e:
         logger.error(f"Error generating weekly report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# =========================================================================
-# ANALYSIS RUNNER - Manual Trigger
-# =========================================================================
-
 @app.post("/api/analysis/run-daily")
 async def run_daily_analysis():
-    """
-    Executa análises diárias manualmente
-
-    ATENÇÃO: Processo pode levar alguns minutos
-    """
+    """Executa análises diárias manualmente"""
     try:
-        from analyzer import Analyzer, save_analysis_to_db
-
-        logger.info("🔄 Starting daily analysis...")
-
-        analyzer = Analyzer(db.supabase)
-        subniches = await db.get_all_subniches()
-
-        results = {
-            "keywords_analyzed": False,
-            "patterns_analyzed": [],
-            "channels_analyzed": []
-        }
-
-        # Análise de keywords (30, 15, 7 dias)
-        for days in [30, 15, 7]:
-            logger.info(f"📊 Analyzing keywords ({days} days)...")
-            keywords = analyzer.analyze_keywords(period_days=days)
-            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
-
-        results['keywords_analyzed'] = True
-
-        # Análise de padrões e canais por subniche
-        for subniche in subniches:
-            logger.info(f"📊 Analyzing {subniche}...")
-
-            # Padrões de título
-            for days in [30, 15, 7]:
-                patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
-                save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
-
-            results['patterns_analyzed'].append(subniche)
-
-            # Top channels
-            channels = analyzer.analyze_top_channels(subniche)
-            save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
-
-            results['channels_analyzed'].append(subniche)
-
-        logger.info("✅ Daily analysis completed")
-
-        return {
-            "message": "Análise diária executada com sucesso",
-            "results": results
-        }
+        await run_daily_analysis_job()
+        return {"message": "Análise diária executada com sucesso"}
     except Exception as e:
         logger.error(f"Error running daily analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/analysis/run-gaps")
 async def run_gap_analysis():
-    """
-    Executa análise de gaps manualmente
-
-    ATENÇÃO: Processo pode levar alguns minutos
-    """
+    """Executa análise de gaps manualmente"""
     try:
         from analyzer import Analyzer, save_analysis_to_db
-
         logger.info("🔄 Starting gap analysis...")
-
         analyzer = Analyzer(db.supabase)
         subniches = await db.get_all_subniches()
-
         gaps_found = {}
-
         for subniche in subniches:
-            logger.info(f"🔍 Analyzing gaps for {subniche}...")
             gaps = analyzer.analyze_gaps(subniche)
             save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
             gaps_found[subniche] = len(gaps)
-
-        logger.info("✅ Gap analysis completed")
-
-        return {
-            "message": "Análise de gaps executada com sucesso",
-            "gaps_found": gaps_found
-        }
+        return {"message": "Análise de gaps executada com sucesso", "gaps_found": gaps_found}
     except Exception as e:
         logger.error(f"Error running gap analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-        logger.error(f"Error toggling regra: {e}")
+
+
+# =========================================================================
+# ANALYSIS TAB - New Endpoints
+# Added by Claude Code - 2024-11-05
+# =========================================================================
+
+@app.get("/api/analysis/keywords")
+async def get_keywords_analysis(days: int = 30):
+    """Retorna top 20 keywords dos últimos X dias"""
+    try:
+        if days not in [7, 15, 30]:
+            raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
+        keywords = await db.get_keyword_analysis(period_days=days)
+        return {"period_days": days, "total": len(keywords), "keywords": keywords}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting keywords analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analysis/title-patterns")
+async def get_title_patterns_analysis(subniche: str, days: int = 30):
+    """Retorna top 5 padrões de título por subniche"""
+    try:
+        if days not in [7, 15, 30]:
+            raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
+        patterns = await db.get_title_patterns(subniche=subniche, period_days=days)
+        return {"subniche": subniche, "period_days": days, "total": len(patterns), "patterns": patterns}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting title patterns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analysis/top-channels")
+async def get_top_channels_analysis(subniche: str):
+    """Retorna top 5 canais por subniche (últimos 30 dias)"""
+    try:
+        channels = await db.get_top_channels_snapshot(subniche=subniche)
+        return {"subniche": subniche, "total": len(channels), "channels": channels}
+    except Exception as e:
+        logger.error(f"Error getting top channels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analysis/subniches")
+async def get_all_subniches():
+    """Retorna lista de todos os subniches ativos"""
+    try:
+        subniches = await db.get_all_subniches()
+        return {"total": len(subniches), "subniches": subniches}
+    except Exception as e:
+        logger.error(f"Error getting subniches: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/reports/weekly/latest")
+async def get_latest_weekly_report():
+    """Retorna o relatório semanal mais recente"""
+    try:
+        report = await db.get_weekly_report_latest()
+        if report:
+            return report
+        else:
+            raise HTTPException(status_code=404, detail="Nenhum relatório encontrado")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting weekly report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/reports/weekly/generate")
+async def generate_weekly_report_endpoint():
+    """Força a geração de um novo relatório semanal"""
+    try:
+        from report_generator import ReportGenerator
+        logger.info("🔄 Starting weekly report generation...")
+        generator = ReportGenerator(db.supabase)
+        report = generator.generate_weekly_report()
+        logger.info("✅ Weekly report generated successfully")
+        return {"message": "Relatório gerado com sucesso", "report": report}
+    except Exception as e:
+        logger.error(f"Error generating weekly report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analysis/run-daily")
+async def run_daily_analysis():
+    """Executa análises diárias manualmente"""
+    try:
+        await run_daily_analysis_job()
+        return {"message": "Análise diária executada com sucesso"}
+    except Exception as e:
+        logger.error(f"Error running daily analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analysis/run-gaps")
+async def run_gap_analysis():
+    """Executa análise de gaps manualmente"""
+    try:
+        from analyzer import Analyzer, save_analysis_to_db
+        logger.info("🔄 Starting gap analysis...")
+        analyzer = Analyzer(db.supabase)
+        subniches = await db.get_all_subniches()
+        gaps_found = {}
+        for subniche in subniches:
+            gaps = analyzer.analyze_gaps(subniche)
+            save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
+            gaps_found[subniche] = len(gaps)
+        return {"message": "Análise de gaps executada com sucesso", "gaps_found": gaps_found}
+    except Exception as e:
+        logger.error(f"Error running gap analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 async def run_collection_job():
     global collection_in_progress, last_collection_time
@@ -1198,133 +1173,6 @@ async def run_collection_job():
         
         for index, canal in enumerate(canais_to_collect, 1):
             if collector.all_keys_exhausted():
-# =========================================================================
-# CRON JOBS - Daily Analysis + Weekly Report
-# Added by Claude Code - 2024-11-05
-# =========================================================================
-
-async def run_daily_analysis_job():
-    """
-    Executa análises diárias após a coleta de dados
-
-    Chamado automaticamente após run_collection_job()
-    """
-    try:
-        from analyzer import Analyzer, save_analysis_to_db
-
-        logger.info("=" * 80)
-        logger.info("📊 STARTING DAILY ANALYSIS JOB")
-        logger.info("=" * 80)
-
-        analyzer = Analyzer(db.supabase)
-        subniches = await db.get_all_subniches()
-
-        # 1. Análise de keywords (30, 15, 7 dias)
-        logger.info("🔍 Analyzing keywords...")
-        for days in [30, 15, 7]:
-            keywords = analyzer.analyze_keywords(period_days=days)
-            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
-            logger.info(f"   ✅ Keywords analyzed ({days} days): {len(keywords)} found")
-
-        # 2. Análise de padrões e top channels por subniche
-        for subniche in subniches:
-            logger.info(f"📝 Analyzing {subniche}...")
-
-            # Padrões de título
-            for days in [30, 15, 7]:
-                patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
-                save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
-
-            # Top channels
-            channels = analyzer.analyze_top_channels(subniche)
-            save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
-
-            logger.info(f"   ✅ {subniche} analysis completed")
-
-        logger.info("=" * 80)
-        logger.info("✅ DAILY ANALYSIS COMPLETED")
-        logger.info("=" * 80)
-
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ DAILY ANALYSIS FAILED: {e}")
-        logger.error("=" * 80)
-
-
-async def run_weekly_report_job():
-    """
-    Gera relatório semanal completo
-
-    Executado aos domingos às 23h (após daily analysis)
-    """
-    try:
-        from report_generator import ReportGenerator
-        from analyzer import Analyzer, save_analysis_to_db
-
-        logger.info("=" * 80)
-        logger.info("📊 STARTING WEEKLY REPORT JOB")
-        logger.info("=" * 80)
-
-        # 1. Executar gap analysis primeiro
-        logger.info("🔍 Running gap analysis...")
-
-        analyzer = Analyzer(db.supabase)
-        subniches = await db.get_all_subniches()
-
-        for subniche in subniches:
-            gaps = analyzer.analyze_gaps(subniche)
-            save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
-            logger.info(f"   ✅ {subniche}: {len(gaps)} gaps found")
-
-        # 2. Gerar relatório completo
-        logger.info("📄 Generating weekly report...")
-
-        generator = ReportGenerator(db.supabase)
-        report = generator.generate_weekly_report()
-
-        logger.info("=" * 80)
-        logger.info("✅ WEEKLY REPORT COMPLETED")
-        logger.info(f"📊 Report period: {report['week_start']} to {report['week_end']}")
-        logger.info("=" * 80)
-
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
-        logger.error("=" * 80)
-
-
-# Scheduler para relatório semanal (domingos 23h)
-async def weekly_report_scheduler():
-    """
-    Background task para executar relatório semanal aos domingos
-
-    Roda em loop infinito, checando a cada hora se é domingo 23h
-    """
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-
-            # Converter para horário de São Paulo (UTC-3)
-            sao_paulo_tz = timezone(timedelta(hours=-3))
-            now_sp = now.astimezone(sao_paulo_tz)
-
-            # Checar se é domingo (weekday() == 6) e hora >= 23h
-            if now_sp.weekday() == 6 and now_sp.hour >= 23:
-                logger.info("🗓️ Sunday night detected - running weekly report...")
-                await run_weekly_report_job()
-
-                # Dormir até segunda-feira para não executar novamente
-                await asyncio.sleep(86400)  # 24 horas
-
-            else:
-                # Checar novamente em 1 hora
-                logger.debug(f"⏰ Weekly report check: Not Sunday 23h yet ({now_sp.isoformat()})")
-                await asyncio.sleep(3600)  # 1 hora
-
-        except Exception as e:
-            logger.error(f"❌ Weekly scheduler error: {e}")
-            await asyncio.sleep(3600)  # Tentar novamente em 1 hora
-
                 logger.error("=" * 80)
                 logger.error("❌ ALL API KEYS EXHAUSTED - STOPPING COLLECTION")
                 logger.error(f"✅ Collected {canais_sucesso}/{total_canais} canais")
@@ -1412,7 +1260,8 @@ async def weekly_report_scheduler():
         logger.info("=" * 80)
         
         last_collection_time = datetime.now(timezone.utc)
-n        # Run daily analysis after collection
+        
+        # Run daily analysis
         await run_daily_analysis_job()
         
     except Exception as e:
@@ -1435,6 +1284,148 @@ n        # Run daily analysis after collection
     finally:
         collection_in_progress = False
 
+
+# =========================================================================
+# CRON JOBS - Daily Analysis + Weekly Report
+# =========================================================================
+
+async def run_daily_analysis_job():
+    """Executa análises diárias após a coleta de dados"""
+    try:
+        from analyzer import Analyzer, save_analysis_to_db
+        logger.info("=" * 80)
+        logger.info("📊 STARTING DAILY ANALYSIS JOB")
+        logger.info("=" * 80)
+        analyzer = Analyzer(db.supabase)
+        subniches = await db.get_all_subniches()
+
+        # Keywords
+        for days in [30, 15, 7]:
+            keywords = analyzer.analyze_keywords(period_days=days)
+            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
+
+        # Patterns e channels por subniche
+        for subniche in subniches:
+            for days in [30, 15, 7]:
+                patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
+                save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
+            channels = analyzer.analyze_top_channels(subniche)
+            save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
+
+        logger.info("✅ DAILY ANALYSIS COMPLETED")
+    except Exception as e:
+        logger.error(f"❌ DAILY ANALYSIS FAILED: {e}")
+
+async def run_weekly_report_job():
+    """Gera relatório semanal completo (domingos 23h)"""
+    try:
+        from report_generator import ReportGenerator
+        from analyzer import Analyzer, save_analysis_to_db
+        logger.info("📊 STARTING WEEKLY REPORT JOB")
+
+        # Gap analysis
+        analyzer = Analyzer(db.supabase)
+        subniches = await db.get_all_subniches()
+        for subniche in subniches:
+            gaps = analyzer.analyze_gaps(subniche)
+            save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
+
+        # Gerar relatório
+        generator = ReportGenerator(db.supabase)
+        report = generator.generate_weekly_report()
+        logger.info(f"✅ WEEKLY REPORT COMPLETED: {report['week_start']} to {report['week_end']}")
+    except Exception as e:
+        logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
+
+async def weekly_report_scheduler():
+    """Background task para relatório semanal (domingos 23h)"""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            sao_paulo_tz = timezone(timedelta(hours=-3))
+            now_sp = now.astimezone(sao_paulo_tz)
+
+            if now_sp.weekday() == 6 and now_sp.hour >= 23:
+                await run_weekly_report_job()
+                await asyncio.sleep(86400)
+            else:
+                await asyncio.sleep(3600)
+        except Exception as e:
+            logger.error(f"❌ Weekly scheduler error: {e}")
+            await asyncio.sleep(3600)
+
+
+
+# =========================================================================
+# CRON JOBS - Daily Analysis + Weekly Report
+# =========================================================================
+
+async def run_daily_analysis_job():
+    """Executa análises diárias após a coleta de dados"""
+    try:
+        from analyzer import Analyzer, save_analysis_to_db
+        logger.info("=" * 80)
+        logger.info("📊 STARTING DAILY ANALYSIS JOB")
+        logger.info("=" * 80)
+        analyzer = Analyzer(db.supabase)
+        subniches = await db.get_all_subniches()
+
+        # Keywords
+        for days in [30, 15, 7]:
+            keywords = analyzer.analyze_keywords(period_days=days)
+            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
+
+        # Patterns e channels por subniche
+        for subniche in subniches:
+            for days in [30, 15, 7]:
+                patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
+                save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
+            channels = analyzer.analyze_top_channels(subniche)
+            save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
+
+        logger.info("✅ DAILY ANALYSIS COMPLETED")
+    except Exception as e:
+        logger.error(f"❌ DAILY ANALYSIS FAILED: {e}")
+
+async def run_weekly_report_job():
+    """Gera relatório semanal completo (domingos 23h)"""
+    try:
+        from report_generator import ReportGenerator
+        from analyzer import Analyzer, save_analysis_to_db
+        logger.info("📊 STARTING WEEKLY REPORT JOB")
+
+        # Gap analysis
+        analyzer = Analyzer(db.supabase)
+        subniches = await db.get_all_subniches()
+        for subniche in subniches:
+            gaps = analyzer.analyze_gaps(subniche)
+            save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
+
+        # Gerar relatório
+        generator = ReportGenerator(db.supabase)
+        report = generator.generate_weekly_report()
+        logger.info(f"✅ WEEKLY REPORT COMPLETED: {report['week_start']} to {report['week_end']}")
+    except Exception as e:
+        logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
+
+async def weekly_report_scheduler():
+    """Background task para relatório semanal (domingos 23h)"""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            sao_paulo_tz = timezone(timedelta(hours=-3))
+            now_sp = now.astimezone(sao_paulo_tz)
+
+            if now_sp.weekday() == 6 and now_sp.hour >= 23:
+                await run_weekly_report_job()
+                await asyncio.sleep(86400)
+            else:
+                await asyncio.sleep(3600)
+        except Exception as e:
+            logger.error(f"❌ Weekly scheduler error: {e}")
+            await asyncio.sleep(3600)
+
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("=" * 80)
@@ -1452,9 +1443,9 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error cleaning stuck collections: {e}")
     
-    asyncio.create_task(weekly_report_scheduler())
     logger.info("📅 Scheduling daily collection (NO startup collection)")
     asyncio.create_task(schedule_daily_collection())
+    asyncio.create_task(weekly_report_scheduler())
     logger.info("=" * 80)
 
 async def schedule_daily_collection():

@@ -16,12 +16,26 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple
 import json
 
-# Stop words em inglês (palavras comuns que não são keywords relevantes)
+# Stop words expandido (português + inglês + termos genéricos)
 STOP_WORDS = {
+    # Inglês básico
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
     'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 'to', 'was', 'will', 'with',
-    'music', 'video', 'channel', 'new', 'best', 'top', 'hour', 'hours', 'minute', 'minutes',
-    'full', 'hd', 'hq', '1080p', '720p', '4k', '2024', '2023', '2022'
+    'but', 'when', 'they', 'until', 'who', 'what', 'where', 'why', 'how', 'this',
+    'these', 'those', 'then', 'than', 'have', 'had', 'been', 'being', 'do', 'does',
+    'did', 'or', 'if', 'can', 'could', 'would', 'should', 'may', 'might', 'not',
+
+    # Português básico
+    'o', 'a', 'os', 'as', 'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na', 'nos',
+    'nas', 'por', 'para', 'com', 'sem', 'sob', 'sobre', 'um', 'uma', 'uns', 'umas',
+    'e', 'ou', 'mas', 'que', 'se', 'quando', 'como', 'onde', 'porque', 'qual',
+    'meu', 'minha', 'meus', 'minhas', 'seu', 'sua', 'seus', 'suas',
+
+    # Termos genéricos de vídeo
+    'music', 'video', 'channel', 'new', 'best', 'top', 'hour', 'hours', 'minute',
+    'minutes', 'full', 'hd', 'hq', '1080p', '720p', '4k', '2024', '2023', '2022',
+    '2025', 'watch', 'subscribe', 'like', 'comment', 'share', 'playlist', 'official',
+    'vídeo', 'canal', 'completo', 'novo', 'nova', 'melhor', 'melhores'
 }
 
 
@@ -43,29 +57,32 @@ class Analyzer:
 
     def analyze_keywords(self, period_days: int = 30) -> List[Dict]:
         """
-        Analisa keywords mais frequentes nos títulos dos vídeos
+        Analisa keywords mais frequentes nos títulos dos vídeos (apenas vídeos 50k+ views)
 
         Args:
             period_days: Período em dias (7, 15 ou 30)
 
         Returns:
-            Lista com top 20 keywords ordenadas por frequência × performance
+            Lista com top 10 keywords ordenadas por frequência × performance
         """
-        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias)...")
+        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 50k+ views)...")
 
-        # Buscar vídeos do período
+        # Buscar vídeos do período (publicados nos últimos X dias com 50k+ views)
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
         response = self.db.table("videos_historico")\
-            .select("titulo, views_atuais, data_coleta")\
-            .gte("data_coleta", cutoff_date.strftime("%Y-%m-%d"))\
+            .select("video_id, titulo, views_atuais, data_publicacao")\
+            .gte("data_publicacao", cutoff_date.strftime("%Y-%m-%d"))\
+            .gte("views_atuais", 50000)\
             .execute()
 
         videos = response.data
 
         if not videos:
-            print("[Analyzer] Nenhum vídeo encontrado no período")
+            print("[Analyzer] Nenhum vídeo encontrado no período com 50k+ views")
             return []
+
+        print(f"[Analyzer] {len(videos)} vídeos encontrados com 50k+ views")
 
         # Extrair keywords de todos os títulos
         keyword_stats = {}  # {keyword: {'count': int, 'total_views': int, 'video_ids': set}}
@@ -73,9 +90,10 @@ class Analyzer:
         for video in videos:
             titulo = video.get('titulo', '').lower()
             views = video.get('views_atuais', 0)
+            video_id = video.get('video_id', '')
 
             # Extrair palavras (remover números, pontuação)
-            words = re.findall(r'\b[a-z]{3,}\b', titulo)
+            words = re.findall(r'\b[a-zà-ú]{3,}\b', titulo)  # Suporta acentos
 
             for word in words:
                 # Pular stop words
@@ -91,7 +109,7 @@ class Analyzer:
 
                 keyword_stats[word]['count'] += 1
                 keyword_stats[word]['total_views'] += views
-                keyword_stats[word]['videos'].add(video.get('video_id', ''))
+                keyword_stats[word]['videos'].add(video_id)
 
         # Calcular score e ordenar
         keyword_list = []
@@ -99,7 +117,7 @@ class Analyzer:
             avg_views = stats['total_views'] // stats['count'] if stats['count'] > 0 else 0
             video_count = len(stats['videos'])
 
-            # Score: frequência × log(views médias) - favorece keywords com boa performance
+            # Score: frequência × sqrt(views médias) - favorece keywords com boa performance
             score = stats['count'] * (avg_views ** 0.5)
 
             keyword_list.append({
@@ -110,143 +128,255 @@ class Analyzer:
                 'score': score
             })
 
-        # Ordenar por score e pegar top 20
+        # Ordenar por score e pegar top 10
         keyword_list.sort(key=lambda x: x['score'], reverse=True)
-        top_20 = keyword_list[:20]
+        top_10 = keyword_list[:10]
 
-        print(f"[Analyzer] {len(top_20)} keywords analisadas")
-        return top_20
+        print(f"[Analyzer] Top {len(top_10)} keywords identificadas")
+        return top_10
 
     # =========================================================================
-    # ANÁLISE DE PADRÕES DE TÍTULO
+    # ANÁLISE DE PADRÕES DE TÍTULO - DETECÇÃO AUTOMÁTICA GRATUITA
     # =========================================================================
+
+    # Dicionários de categorização de palavras (expandível por subniche)
+    CATEGORIAS_PALAVRAS = {
+        'RELAÇÃO FAMILIAR': [
+            'marido', 'esposa', 'mulher', 'esposo', 'filho', 'filha', 'filhos',
+            'pai', 'mãe', 'pais', 'sogro', 'sogra', 'sogros', 'irmão', 'irmã',
+            'tio', 'tia', 'avô', 'avó', 'neto', 'neta', 'primo', 'prima',
+            'cunhado', 'cunhada', 'genro', 'nora', 'padrasto', 'madrasta',
+            'família', 'parente', 'parentes'
+        ],
+        'TRAGÉDIA': [
+            'faleceu', 'morreu', 'morte', 'morre', 'funeral', 'enterro',
+            'acidente', 'tragédia', 'doença', 'câncer', 'hospital',
+            'assassinato', 'assassinada', 'desapareceu', 'partiu', 'falecimento'
+        ],
+        'HERANÇA': [
+            'herdou', 'herança', 'herdeira', 'testamento', 'bens', 'patrimônio',
+            'deixou', 'legado', 'fortuna'
+        ],
+        'INJUSTIÇA': [
+            'injustiça', 'injusto', 'traiu', 'traição', 'abandonou',
+            'expulsou', 'roubou', 'enganou', 'mentiu', 'excluiu',
+            'humilhou', 'desprezou', 'ignorou', 'restou', 'sobrou'
+        ],
+        'EMOÇÃO FORTE': [
+            'furioso', 'furiosa', 'chocado', 'chorou', 'gritou',
+            'explodiu', 'revoltado', 'desesperado', 'arrasado'
+        ],
+        'REVIRAVOLTA': [
+            'desapareci', 'fugi', 'saí', 'abandonei', 'vinguei',
+            'revelei', 'descobri', 'confessei', 'então'
+        ],
+        'CITAÇÃO': ['disse', 'falou', 'gritou', 'perguntou', 'respondeu'],
+        'DURAÇÃO': ['hours', 'hour', 'horas', 'minutos', 'minutes', 'mins'],
+        'GÊNERO MUSICAL': ['jazz', 'blues', 'lofi', 'rock', 'classical', 'piano', 'guitar'],
+        'CONTEXTO USO': ['study', 'sleep', 'relax', 'work', 'estudar', 'dormir', 'relaxar'],
+        'FREQUÊNCIA': ['hz', 'hertz', '432hz', '528hz', '639hz'],
+        'BENEFÍCIO': ['healing', 'meditation', 'peace', 'calm', 'energia', 'cura']
+    }
 
     def analyze_title_patterns(self, subniche: str, period_days: int = 30) -> List[Dict]:
         """
-        Detecta padrões de título vencedores por subniche
+        Detecta padrões de título automaticamente (GRATUITO - sem IA)
+
+        Estratégia:
+        1. Busca vídeos com 50k+ views (publicados últimos 30 dias)
+        2. Prioriza dados coletados nos últimos 7 dias (performance recente)
+        3. Analisa estrutura: categoriza palavras, detecta CAPS, dinheiro, citações
+        4. Agrupa títulos similares por características
+        5. Retorna top 5 padrões com estrutura simples: [CAT1] + [CAT2] + [CAT3]
 
         Args:
             subniche: Subniche a analisar
             period_days: Período em dias (7, 15 ou 30)
 
         Returns:
-            Lista com top 5 padrões de título ordenados por performance
+            Lista com top 5 padrões: structure, example_title, avg_views, video_count
         """
-        print(f"[Analyzer] Analisando padrões de título ({subniche}, {period_days} dias)...")
+        print(f"[Analyzer] Analisando padrões de título ({subniche}, {period_days} dias, 50k+ views)...")
 
-        # Buscar vídeos do período e subniche
-        cutoff_date = datetime.now() - timedelta(days=period_days)
+        # PRIORIDADE 1: Vídeos com dados coletados nos últimos 7 dias
+        cutoff_publication = datetime.now() - timedelta(days=30)  # Publicados últimos 30 dias
+        cutoff_collection = datetime.now() - timedelta(days=7)   # Coletados últimos 7 dias
 
-        response = self.db.table("videos_historico")\
-            .select("*, canais_monitorados!inner(subnicho)")\
+        response_recent = self.db.table("videos_historico")\
+            .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
             .eq("canais_monitorados.subnicho", subniche)\
-            .gte("data_coleta", cutoff_date.strftime("%Y-%m-%d"))\
+            .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
+            .gte("data_coleta", cutoff_collection.strftime("%Y-%m-%d"))\
+            .gte("views_atuais", 50000)\
+            .order("views_atuais", desc=True)\
+            .limit(50)\
             .execute()
 
-        videos = response.data
+        videos = response_recent.data
+
+        # Se temos poucos vídeos recentes, complementa com últimos 30 dias
+        if len(videos) < 20:
+            response_older = self.db.table("videos_historico")\
+                .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
+                .gte("views_atuais", 50000)\
+                .order("views_atuais", desc=True)\
+                .limit(50)\
+                .execute()
+
+            # Mescla sem duplicar
+            existing_ids = {v['video_id'] for v in videos}
+            for v in response_older.data:
+                if v['video_id'] not in existing_ids:
+                    videos.append(v)
 
         if not videos:
-            print(f"[Analyzer] Nenhum vídeo encontrado para {subniche}")
+            print(f"[Analyzer] Nenhum vídeo 50k+ encontrado para {subniche}")
             return []
 
-        # Detectar padrões
-        patterns = {}  # {pattern_key: {'structure': str, 'examples': [], 'views': [], 'count': int}}
+        print(f"[Analyzer] {len(videos)} vídeos encontrados para análise")
 
+        # Analisa estrutura de cada título
+        analyzed_titles = []
         for video in videos:
-            titulo = video.get('titulo', '')
-            views = video.get('views_atuais', 0)
+            features = self._analyze_title_structure(video['titulo'])
+            features['titulo'] = video['titulo']
+            features['views'] = video['views_atuais']
+            features['video_id'] = video['video_id']
+            analyzed_titles.append(features)
 
-            # Detectar padrão do título
-            pattern = self._detect_title_pattern(titulo)
+        # Agrupa por estrutura similar e extrai padrões
+        patterns = self._group_by_pattern(analyzed_titles)
 
-            if pattern not in patterns:
-                patterns[pattern] = {
-                    'structure': pattern,
-                    'examples': [],
-                    'views': [],
-                    'count': 0
-                }
-
-            patterns[pattern]['examples'].append(titulo)
-            patterns[pattern]['views'].append(views)
-            patterns[pattern]['count'] += 1
-
-        # Calcular performance e ordenar
-        pattern_list = []
-        for pattern_key, data in patterns.items():
-            if data['count'] < 3:  # Mínimo de 3 vídeos para ser considerado padrão
-                continue
-
-            avg_views = sum(data['views']) // len(data['views'])
-
-            # Pegar melhor exemplo (maior views)
-            best_example_idx = data['views'].index(max(data['views']))
-            best_example = data['examples'][best_example_idx]
-
-            pattern_list.append({
-                'pattern_structure': pattern_key,
-                'pattern_description': self._describe_pattern(pattern_key),
-                'example_title': best_example,
-                'avg_views': avg_views,
-                'video_count': data['count']
-            })
-
-        # Ordenar por views médias e pegar top 5
-        pattern_list.sort(key=lambda x: x['avg_views'], reverse=True)
-        top_5 = pattern_list[:5]
+        # Ordena por performance e retorna top 5
+        patterns.sort(key=lambda x: x['avg_views'], reverse=True)
+        top_5 = patterns[:5]
 
         print(f"[Analyzer] {len(top_5)} padrões identificados para {subniche}")
         return top_5
 
-    def _detect_title_pattern(self, titulo: str) -> str:
-        """Detecta o padrão estrutural de um título"""
+    def _analyze_title_structure(self, titulo: str) -> Dict:
+        """Analisa características estruturais de um título"""
 
-        # Padrões comuns (ordenados por prioridade)
-        patterns = [
-            # [Número] Hours/Minutes + [Descrição]
-            (r'^\d+\s+(hours?|minutes?|mins?|hrs?)\s+', '[Número] [Tempo] + [Descrição]'),
-
-            # [Hora específica] + [Música] + to [Ação]
-            (r'^\d+[ap]m\s+', '[Hora] + [Música] + [Ação]'),
-
-            # [Adjetivo] + [Tipo] + for [Contexto]
-            (r'\b(cozy|chill|relaxing|smooth|soft|calm|peaceful)\b.*\bfor\b', '[Adjetivo] + [Tipo] + for [Contexto]'),
-
-            # [Tipo de música] + [Instrumento]
-            (r'\b(jazz|lofi|blues|rock)\b.*\b(piano|guitar|saxophone|violin)\b', '[Tipo] + [Instrumento]'),
-
-            # [Clima/Ambiente] + [Música] + [Benefício]
-            (r'\b(rainy|snowy|winter|summer|night|morning)\b', '[Ambiente] + [Música] + [Benefício]'),
-
-            # [Música] + to/for [Ação] + and [Ação]
-            (r'\b(to|for)\b.*\band\b', '[Música] + [Ação] and [Ação]'),
-
-            # [Frequência] Hz + [Descrição]
-            (r'\b\d+hz\b', '[Frequência Hz] + [Descrição]'),
-        ]
+        features = {
+            'categorias': [],  # Categorias detectadas (FAMÍLIA, TRAGÉDIA, etc)
+            'has_money': False,
+            'money_value': None,
+            'has_caps': False,
+            'caps_words': [],
+            'has_quote': False,
+            'has_suspense': False,
+            'has_exclamation': False,
+            'word_count': len(titulo.split())
+        }
 
         titulo_lower = titulo.lower()
 
-        for pattern_regex, pattern_name in patterns:
-            if re.search(pattern_regex, titulo_lower):
-                return pattern_name
+        # Detecta categorias de palavras
+        for categoria, palavras in self.CATEGORIAS_PALAVRAS.items():
+            for palavra in palavras:
+                if palavra in titulo_lower:
+                    if categoria not in features['categorias']:
+                        features['categorias'].append(categoria)
+                    break
 
-        # Padrão genérico
-        return '[Título Padrão]'
+        # Detecta dinheiro
+        money_patterns = [
+            r'R\$\s*\d+(?:\.\d+)?\s*(?:milhões?|mil)?',
+            r'\d+\s*milhões?\s*de\s*reais',
+            r'\d+\s*mil\s*reais'
+        ]
+        for pattern in money_patterns:
+            match = re.search(pattern, titulo, re.I)
+            if match:
+                features['has_money'] = True
+                features['money_value'] = match.group()
+                break
 
-    def _describe_pattern(self, pattern_structure: str) -> str:
-        """Gera descrição legível do padrão"""
-        descriptions = {
-            '[Número] [Tempo] + [Descrição]': 'Duração específica + descrição do conteúdo',
-            '[Hora] + [Música] + [Ação]': 'Horário específico + gênero + propósito',
-            '[Adjetivo] + [Tipo] + for [Contexto]': 'Qualificador emocional + gênero + uso',
-            '[Tipo] + [Instrumento]': 'Gênero musical + instrumento específico',
-            '[Ambiente] + [Música] + [Benefício]': 'Contexto ambiental + gênero + efeito',
-            '[Música] + [Ação] and [Ação]': 'Gênero + dupla finalidade',
-            '[Frequência Hz] + [Descrição]': 'Frequência específica + benefício',
-            '[Título Padrão]': 'Estrutura não categorizada'
-        }
-        return descriptions.get(pattern_structure, 'Padrão genérico')
+        # Detecta CAPS (palavras em maiúsculas)
+        caps_words = re.findall(r'\b[A-ZÁÉÍÓÚÂÊÔÃÕÇ]{3,}\b', titulo)
+        if caps_words:
+            features['has_caps'] = True
+            features['caps_words'] = caps_words
+
+        # Detecta citação (aspas, travessão)
+        if re.search(r'["\'].*["\']|—|"|"', titulo):
+            features['has_quote'] = True
+
+        # Detecta suspense (reticências)
+        if re.search(r'\.{2,}|…', titulo):
+            features['has_suspense'] = True
+
+        # Detecta exclamação
+        if '!' in titulo:
+            features['has_exclamation'] = True
+
+        return features
+
+    def _group_by_pattern(self, analyzed_titles: List[Dict]) -> List[Dict]:
+        """Agrupa títulos por estrutura similar e extrai padrões"""
+
+        patterns = []
+
+        # Agrupa por combinações de categorias
+        category_groups = {}
+
+        for item in analyzed_titles:
+            # Cria chave baseada nas categorias (ordenadas)
+            cats = sorted(item['categorias'])
+            if not cats:
+                continue
+
+            key = tuple(cats)
+
+            if key not in category_groups:
+                category_groups[key] = []
+
+            category_groups[key].append(item)
+
+        # Para cada grupo, cria um padrão
+        for categories_tuple, items in category_groups.items():
+            if len(items) < 3:  # Mínimo 3 vídeos para ser considerado padrão
+                continue
+
+            # Calcula métricas
+            avg_views = sum(item['views'] for item in items) // len(items)
+            best_item = max(items, key=lambda x: x['views'])
+
+            # Monta estrutura do padrão
+            structure_parts = list(categories_tuple)
+
+            # Adiciona características especiais se presentes na maioria
+            money_count = sum(1 for i in items if i['has_money'])
+            caps_count = sum(1 for i in items if i['has_caps'])
+            quote_count = sum(1 for i in items if i['has_quote'])
+            suspense_count = sum(1 for i in items if i['has_suspense'])
+
+            total = len(items)
+
+            if money_count / total >= 0.6:  # 60%+ tem dinheiro
+                if 'HERANÇA' not in structure_parts:
+                    structure_parts.append('VALOR FINANCEIRO')
+
+            if quote_count / total >= 0.6:  # 60%+ tem citação
+                if 'CITAÇÃO' not in structure_parts:
+                    structure_parts.insert(min(2, len(structure_parts)), 'CITAÇÃO DIRETA')
+
+            if suspense_count / total >= 0.6:  # 60%+ tem suspense
+                structure_parts.append('SUSPENSE')
+
+            # Monta estrutura final
+            structure = ' + '.join([f'[{part}]' for part in structure_parts])
+
+            patterns.append({
+                'pattern_structure': structure,
+                'example_title': best_item['titulo'],
+                'avg_views': avg_views,
+                'video_count': len(items)
+            })
+
+        return patterns
 
     # =========================================================================
     # ANÁLISE DE TOP CHANNELS
@@ -296,21 +426,44 @@ class Analyzer:
                     'data_coleta': row['data_coleta']
                 }
 
-        # Calcular inscritos ganhos (comparar snapshots de 30 dias atrás)
+        # Calcular inscritos ganhos (mês atual e mês anterior)
         for canal_id, data in channels_by_id.items():
-            # Buscar snapshot de 30 dias atrás
-            old_date = datetime.now() - timedelta(days=60)
+            current_subs = data['inscritos']
 
-            old_response = self.db.table("dados_canais_historico")\
+            # Buscar snapshot de 30 dias atrás (início do mês atual)
+            date_30d_ago = datetime.now() - timedelta(days=30)
+            response_30d = self.db.table("dados_canais_historico")\
                 .select("inscritos")\
                 .eq("canal_id", canal_id)\
-                .lte("data_coleta", old_date.strftime("%Y-%m-%d"))\
+                .lte("data_coleta", date_30d_ago.strftime("%Y-%m-%d"))\
                 .order("data_coleta", desc=True)\
                 .limit(1)\
                 .execute()
 
-            old_subs = old_response.data[0]['inscritos'] if old_response.data else data['inscritos']
-            data['subscribers_gained_30d'] = data['inscritos'] - old_subs
+            subs_30d_ago = response_30d.data[0]['inscritos'] if response_30d.data else current_subs
+            data['subscribers_gained_30d'] = current_subs - subs_30d_ago
+
+            # Buscar snapshot de 60 dias atrás (início do mês anterior)
+            date_60d_ago = datetime.now() - timedelta(days=60)
+            response_60d = self.db.table("dados_canais_historico")\
+                .select("inscritos")\
+                .eq("canal_id", canal_id)\
+                .lte("data_coleta", date_60d_ago.strftime("%Y-%m-%d"))\
+                .order("data_coleta", desc=True)\
+                .limit(1)\
+                .execute()
+
+            subs_60d_ago = response_60d.data[0]['inscritos'] if response_60d.data else subs_30d_ago
+
+            # Inscritos ganhos no mês anterior (60-30 dias atrás)
+            data['subscribers_previous_month'] = subs_30d_ago - subs_60d_ago
+
+            # Crescimento percentual (mês atual vs mês anterior)
+            if data['subscribers_previous_month'] > 0:
+                growth = ((data['subscribers_gained_30d'] - data['subscribers_previous_month']) / data['subscribers_previous_month']) * 100
+                data['growth_percentage'] = round(growth, 1)
+            else:
+                data['growth_percentage'] = 0.0
 
         # Ordenar por views_30d e pegar top 5
         channel_list = list(channels_by_id.values())

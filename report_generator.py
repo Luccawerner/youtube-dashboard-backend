@@ -291,65 +291,138 @@ class ReportGenerator:
 
     def _generate_recommendations(self) -> List[Dict]:
         """
-        Gera lista de ações recomendadas baseadas em toda a análise
+        Gera lista de ações recomendadas ESTRATÉGICAS com 4 tipos de insights:
+        1. NOSSOS CANAIS - PROBLEMAS (urgente)
+        2. CONCORRENTES - COPIAR (alta prioridade)
+        3. NOSSOS CANAIS - CONTINUAR (média prioridade)
+        4. NOSSOS CANAIS - MELHORAR (média prioridade)
 
         Returns:
-            Lista de recomendações priorizadas
+            Lista de recomendações priorizadas com category, impact, effort, avg_views
         """
-        print("[ReportGenerator] Gerando recomendações...")
+        print("[ReportGenerator] Gerando recomendações estratégicas...")
 
         recommendations = []
 
-        # 1. Verificar subniches em queda
+        # Buscar dados de performance
         performance_data = self._get_performance_by_subniche(
             (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         )
 
+        # =====================================================================
+        # 1. NOSSOS CANAIS - PROBLEMAS URGENTES (Subnichos em queda acentuada)
+        # =====================================================================
         for perf in performance_data:
-            if perf['growth_percentage'] < -5:
+            if perf['growth_percentage'] < -10:  # Queda >10%
                 recommendations.append({
                     'priority': 'urgent',
-                    'title': f"URGENTE - {perf['subniche']} em queda",
-                    'description': f"Queda de {abs(perf['growth_percentage'])}% na última semana",
-                    'action': f"Revisar últimos 10 vídeos: thumbnails, títulos e descrições. Testar novos padrões de título."
+                    'category': 'NOSSOS CANAIS - PROBLEMA',
+                    'title': f"🔴 {perf['subniche']} em queda acentuada",
+                    'description': f"Queda de {abs(perf['growth_percentage']):.1f}% nas views. Necessário ação imediata para reverter tendência negativa.",
+                    'action': f"1) Revisar últimos 5 vídeos: thumbnails, títulos, hooks iniciais\n2) Comparar com concorrentes top do subniche {perf['subniche']}\n3) Testar novo formato de vídeo ou padrão de título\n4) Analisar retenção de audiência (primeiros 30s)",
+                    'impact': 'CRÍTICO',
+                    'effort': 'Alto'
                 })
 
-        # 2. Top gaps (oportunidades)
+        # =====================================================================
+        # 2. CONCORRENTES - O QUE ELES FAZEM BEM E DEVEMOS COPIAR
+        # =====================================================================
         gaps = self._get_gap_analysis()
-        for subniche, gap_list in gaps.items():
-            if gap_list:
-                top_gap = gap_list[0]  # Gap com maior potencial
+        gap_count = 0
+        for subniche, gap_list in list(gaps.items())[:3]:  # Top 3 subniches com gaps
+            if gap_list and gap_count < 3:
+                top_gap = gap_list[0]
                 recommendations.append({
                     'priority': 'high',
-                    'title': f"OPORTUNIDADE - {subniche}",
-                    'description': f"{top_gap['gap_title']} ({top_gap['competitor_count']} concorrentes, {top_gap['avg_views']:,} views avg)",
-                    'action': top_gap['recommendation']
+                    'category': 'CONCORRENTES - COPIAR',
+                    'title': f"🎯 Oportunidade em {subniche}",
+                    'description': f"{top_gap['gap_title']}: {top_gap['competitor_count']} concorrentes fazem isso e nós não. Média de {top_gap['avg_views']:,} views.",
+                    'action': top_gap['recommendation'],
+                    'impact': 'ALTO',
+                    'effort': 'Médio',
+                    'avg_views': top_gap['avg_views']
+                })
+                gap_count += 1
+
+        # =====================================================================
+        # 3. NOSSOS CANAIS - O QUE FAZEMOS BEM E DEVEMOS CONTINUAR
+        # =====================================================================
+        # Identifica top performers (subniches com crescimento >15%)
+        top_performers = sorted(performance_data, key=lambda x: x['growth_percentage'], reverse=True)[:2]
+
+        for perf in top_performers:
+            if perf['growth_percentage'] > 15:
+                # Busca padrão de sucesso desse subniche
+                patterns_response = self.db.table("title_patterns")\
+                    .select("*")\
+                    .eq("subniche", perf['subniche'])\
+                    .eq("analyzed_date", datetime.now().strftime("%Y-%m-%d"))\
+                    .order("avg_views", desc=True)\
+                    .limit(1)\
+                    .execute()
+
+                if patterns_response.data:
+                    pattern = patterns_response.data[0]
+                    recommendations.append({
+                        'priority': 'medium',
+                        'category': 'NOSSOS CANAIS - CONTINUAR',
+                        'title': f"✅ {perf['subniche']} performando excelente (+{perf['growth_percentage']:.1f}%)",
+                        'description': f"Crescimento de {perf['growth_percentage']:.1f}% nas views. Fórmula está funcionando muito bem!",
+                        'action': f"MANTER estratégia atual:\n• Continuar usando padrão: {pattern['pattern_structure']}\n• Exemplo de sucesso: \"{pattern['example_title']}\"\n• Replicar em outros subniches se possível",
+                        'impact': 'MÉDIO',
+                        'effort': 'Baixo',
+                        'avg_views': pattern['avg_views']
+                    })
+
+        # =====================================================================
+        # 4. NOSSOS CANAIS - O QUE FAZEMOS MAL E DEVEMOS MELHORAR
+        # =====================================================================
+        # Identifica underperformers (abaixo da média)
+        if performance_data:
+            avg_growth = sum(p['growth_percentage'] for p in performance_data) / len(performance_data)
+            underperformers = [p for p in performance_data if p['growth_percentage'] < avg_growth * 0.5][:2]
+
+            for perf in underperformers:
+                recommendations.append({
+                    'priority': 'medium',
+                    'category': 'NOSSOS CANAIS - MELHORAR',
+                    'title': f"⚠️ {perf['subniche']} abaixo da média",
+                    'description': f"Crescimento de apenas {perf['growth_percentage']:.1f}% vs média geral de {avg_growth:.1f}%. Há espaço para otimização.",
+                    'action': f"1) Analisar top 3 vídeos dos concorrentes de {perf['subniche']}\n2) Testar novos formatos de thumbnail (A/B test)\n3) Revisar SEO: título, descrição, tags\n4) Avaliar horário de postagem e frequência",
+                    'impact': 'MÉDIO',
+                    'effort': 'Médio'
                 })
 
-        # 3. Padrões de sucesso
-        # Buscar top 3 padrões de título com melhor performance
-        patterns_response = self.db.table("title_patterns")\
+        # =====================================================================
+        # 5. OPORTUNIDADES - KEYWORDS TRENDING
+        # =====================================================================
+        # Busca keywords que estão ganhando tração (últimos 7 dias)
+        keywords_response = self.db.table("keyword_analysis")\
             .select("*")\
+            .eq("period_days", 7)\
             .eq("analyzed_date", datetime.now().strftime("%Y-%m-%d"))\
-            .order("avg_views", desc=True)\
+            .order("frequency", desc=True)\
             .limit(3)\
             .execute()
 
-        if patterns_response.data:
-            top_patterns = patterns_response.data
+        if keywords_response.data:
+            trending_keywords = [k['keyword'] for k in keywords_response.data[:3]]
             recommendations.append({
                 'priority': 'medium',
-                'title': "REPLICAR SUCESSO - Top padrões de título",
-                'description': f"Padrões com melhor performance identificados",
-                'action': f"Aplicar estruturas: {', '.join([p['pattern_structure'] for p in top_patterns[:3]])}"
+                'category': 'OPORTUNIDADE - TRENDING',
+                'title': f"📈 Keywords em alta nos últimos 7 dias",
+                'description': f"Palavras-chave ganhando tração: {', '.join(trending_keywords)}",
+                'action': f"Criar vídeos priorizando essas keywords nos títulos, descrições e tags. Aproveitar a onda de interesse!",
+                'impact': 'MÉDIO',
+                'effort': 'Baixo'
             })
 
         # Ordenar por prioridade
         priority_order = {'urgent': 0, 'high': 1, 'medium': 2}
         recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
 
-        print(f"[ReportGenerator] {len(recommendations)} recomendações geradas")
-        return recommendations[:10]  # Top 10 recomendações
+        print(f"[ReportGenerator] {len(recommendations)} recomendações estratégicas geradas")
+        return recommendations[:8]  # Top 8 recomendações mais importantes
 
     # =========================================================================
     # SALVAR RELATÓRIO

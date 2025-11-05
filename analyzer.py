@@ -138,7 +138,7 @@ class Analyzer:
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
         response = self.db.table("videos_historico")\
-            .select("videos_historico.*, canais_monitorados!inner(subnicho)")\
+            .select("*, canais_monitorados!inner(subnicho)")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_coleta", cutoff_date.strftime("%Y-%m-%d"))\
             .execute()
@@ -342,7 +342,7 @@ class Analyzer:
         # Buscar padrões dos nossos canais
         # (Para isso, precisamos modificar a query para buscar tipo='nosso')
         response = self.db.table("videos_historico")\
-            .select("videos_historico.*, canais_monitorados!inner(subnicho, tipo)")\
+            .select("*, canais_monitorados!inner(subnicho, tipo)")\
             .eq("canais_monitorados.subnicho", subniche)\
             .eq("canais_monitorados.tipo", "nosso")\
             .gte("data_coleta", (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))\

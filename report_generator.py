@@ -87,7 +87,7 @@ class ReportGenerator:
 
         # Query: vídeos postados nos últimos 30 dias, ordenados por views dos últimos 7 dias
         response = self.db.table("videos_historico")\
-            .select("videos_historico.*, canais_monitorados!inner(nome_canal, tipo, id)")\
+            .select("*, canais_monitorados!inner(nome_canal, tipo, id)")\
             .eq("canais_monitorados.tipo", tipo_canal)\
             .gte("data_publicacao", cutoff_date_30d)\
             .gte("data_coleta", week_start)\

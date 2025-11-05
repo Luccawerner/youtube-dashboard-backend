@@ -139,44 +139,157 @@ class Analyzer:
     # ANÁLISE DE PADRÕES DE TÍTULO - DETECÇÃO AUTOMÁTICA GRATUITA
     # =========================================================================
 
-    # Dicionários de categorização de palavras (expandível por subniche)
-    CATEGORIAS_PALAVRAS = {
+    # Dicionários de categorização SEPARADOS por tipo de conteúdo
+    CATEGORIAS_STORYTELLING = {
         'RELAÇÃO FAMILIAR': [
-            'marido', 'esposa', 'mulher', 'esposo', 'filho', 'filha', 'filhos',
-            'pai', 'mãe', 'pais', 'sogro', 'sogra', 'sogros', 'irmão', 'irmã',
-            'tio', 'tia', 'avô', 'avó', 'neto', 'neta', 'primo', 'prima',
-            'cunhado', 'cunhada', 'genro', 'nora', 'padrasto', 'madrasta',
-            'família', 'parente', 'parentes'
+            'marido', 'esposa', 'mulher', 'esposo', 'husband', 'wife',
+            'filho', 'filha', 'filhos', 'son', 'daughter', 'children',
+            'pai', 'mãe', 'pais', 'father', 'mother', 'parents', 'dad', 'mom',
+            'sogro', 'sogra', 'sogros', 'father-in-law', 'mother-in-law',
+            'irmão', 'irmã', 'brother', 'sister', 'siblings',
+            'tio', 'tia', 'uncle', 'aunt',
+            'avô', 'avó', 'grandfather', 'grandmother', 'grandparents',
+            'neto', 'neta', 'grandson', 'granddaughter',
+            'primo', 'prima', 'cousin',
+            'cunhado', 'cunhada', 'genro', 'nora',
+            'padrasto', 'madrasta', 'stepfather', 'stepmother',
+            'família', 'parente', 'parentes', 'family', 'relative'
         ],
         'TRAGÉDIA': [
-            'faleceu', 'morreu', 'morte', 'morre', 'funeral', 'enterro',
-            'acidente', 'tragédia', 'doença', 'câncer', 'hospital',
-            'assassinato', 'assassinada', 'desapareceu', 'partiu', 'falecimento'
+            'faleceu', 'morreu', 'morte', 'died', 'death', 'passed', 'funeral',
+            'enterro', 'velório', 'burial',
+            'acidente', 'tragédia', 'accident', 'tragedy',
+            'doença', 'câncer', 'hospital', 'disease', 'cancer', 'illness',
+            'assassinato', 'assassinada', 'murder', 'killed',
+            'desapareceu', 'disappeared', 'missing'
         ],
         'HERANÇA': [
-            'herdou', 'herança', 'herdeira', 'testamento', 'bens', 'patrimônio',
-            'deixou', 'legado', 'fortuna'
+            'herdou', 'herança', 'herdeira', 'inherited', 'inheritance', 'heir',
+            'testamento', 'will', 'testament',
+            'bens', 'patrimônio', 'property', 'estate',
+            'deixou', 'legado', 'left', 'legacy',
+            'fortuna', 'fortune', 'wealth'
         ],
         'INJUSTIÇA': [
-            'injustiça', 'injusto', 'traiu', 'traição', 'abandonou',
-            'expulsou', 'roubou', 'enganou', 'mentiu', 'excluiu',
-            'humilhou', 'desprezou', 'ignorou', 'restou', 'sobrou'
+            'injustiça', 'injusto', 'injustice', 'unfair',
+            'traiu', 'traição', 'betrayed', 'betrayal', 'cheated',
+            'abandonou', 'abandoned', 'left',
+            'expulsou', 'kicked', 'expelled',
+            'roubou', 'roubo', 'stole', 'robbed', 'theft',
+            'enganou', 'mentiu', 'mentira', 'lied', 'deceived', 'lie',
+            'excluiu', 'excluded',
+            'humilhou', 'humilhação', 'humiliated',
+            'desprezou', 'desprezo', 'ignored', 'rejected',
+            'restou', 'sobrou', 'left with'
         ],
         'EMOÇÃO FORTE': [
-            'furioso', 'furiosa', 'chocado', 'chorou', 'gritou',
-            'explodiu', 'revoltado', 'desesperado', 'arrasado'
+            'furioso', 'furiosa', 'fúria', 'furious', 'angry', 'rage',
+            'chocado', 'chocada', 'choque', 'shocked', 'stunned',
+            'chorou', 'choro', 'chorando', 'cried', 'crying', 'tears',
+            'gritou', 'grito', 'gritando', 'screamed', 'yelled', 'shouted',
+            'explodiu', 'explosão', 'exploded',
+            'revoltado', 'revolta', 'revolted',
+            'desesperado', 'desespero', 'desperate',
+            'arrasado', 'arrasada', 'devastated'
         ],
         'REVIRAVOLTA': [
-            'desapareci', 'fugi', 'saí', 'abandonei', 'vinguei',
-            'revelei', 'descobri', 'confessei', 'então'
+            'desapareci', 'disappeared',
+            'fugi', 'fuga', 'ran', 'escape',
+            'saí', 'left',
+            'abandonei', 'vinguei', 'vingança', 'revenge',
+            'revelei', 'revelação', 'revealed',
+            'descobri', 'descoberta', 'discovered', 'found',
+            'confessei', 'confissão', 'confessed',
+            'então', 'then', 'but'
         ],
-        'CITAÇÃO': ['disse', 'falou', 'gritou', 'perguntou', 'respondeu'],
-        'DURAÇÃO': ['hours', 'hour', 'horas', 'minutos', 'minutes', 'mins'],
-        'GÊNERO MUSICAL': ['jazz', 'blues', 'lofi', 'rock', 'classical', 'piano', 'guitar'],
-        'CONTEXTO USO': ['study', 'sleep', 'relax', 'work', 'estudar', 'dormir', 'relaxar'],
-        'FREQUÊNCIA': ['hz', 'hertz', '432hz', '528hz', '639hz'],
-        'BENEFÍCIO': ['healing', 'meditation', 'peace', 'calm', 'energia', 'cura']
+        'CITAÇÃO': [
+            'disse', 'falou', 'said', 'told',
+            'gritou', 'screamed', 'yelled',
+            'perguntou', 'asked',
+            'respondeu', 'replied'
+        ],
+        'SEGREDO': [
+            'segredo', 'secret', 'hidden',
+            'escondido', 'oculto',
+            'verdade', 'truth',
+            'mistério', 'mystery'
+        ],
+        'CONFLITO': [
+            'briga', 'fight', 'argument',
+            'discussão', 'dispute',
+            'guerra', 'war',
+            'problema', 'problem'
+        ]
     }
+
+    CATEGORIAS_MUSICA = {
+        'DURAÇÃO': ['hours', 'hour', 'horas', 'hora', 'minutos', 'minutes', 'mins'],
+        'GÊNERO MUSICAL': [
+            'jazz', 'blues', 'lofi', 'lo-fi', 'rock', 'classical', 'pop',
+            'piano', 'guitar', 'saxophone', 'violin', 'instrumental'
+        ],
+        'CONTEXTO USO': [
+            'study', 'sleep', 'relax', 'work', 'focus', 'meditation',
+            'estudar', 'dormir', 'relaxar', 'trabalhar', 'focar'
+        ],
+        'FREQUÊNCIA': ['hz', 'hertz', '432hz', '528hz', '639hz', '741hz'],
+        'BENEFÍCIO': [
+            'healing', 'meditation', 'peace', 'calm', 'calming',
+            'energia', 'cura', 'relaxamento', 'peaceful'
+        ],
+        'AMBIENTE': [
+            'rainy', 'rain', 'snowy', 'winter', 'summer', 'night', 'morning',
+            'cozy', 'chill', 'relaxing', 'smooth', 'soft'
+        ]
+    }
+
+    CATEGORIAS_HISTORIA = {
+        'TEMA HISTÓRICO': [
+            'ancient', 'history', 'civilization', 'empire', 'kingdom',
+            'war', 'battle', 'medieval', 'renaissance',
+            'antiguidade', 'história', 'civilização', 'império', 'reino'
+        ],
+        'MISTÉRIO': [
+            'mystery', 'unsolved', 'secret', 'hidden', 'unknown',
+            'mistério', 'inexplicável', 'desconhecido'
+        ],
+        'DESCOBERTA': [
+            'discovered', 'found', 'revealed', 'uncovered',
+            'descoberta', 'revelação', 'achado'
+        ]
+    }
+
+    def _get_subniche_type(self, subniche: str) -> str:
+        """
+        Determina o tipo de conteúdo baseado no subniche
+
+        Returns:
+            'storytelling', 'music' ou 'history'
+        """
+        storytelling_niches = [
+            'Contos Familiares', 'Histórias Motivacionais', 'Histórias Sombrias',
+            'Histórias Aleatórias', 'Storytelling', 'Contos'
+        ]
+
+        music_niches = [
+            'Jazz', 'Blues', 'Lofi', 'Classical', 'Piano', 'Focus',
+            'Música', 'Music', 'Frequencies', 'Frequências', 'Meditação', 'Meditation'
+        ]
+
+        history_niches = [
+            'Antiguidade', 'História Antiga', 'Civilizações', 'History',
+            'Ancient', 'Mistérios', 'Mysteries'
+        ]
+
+        if subniche in storytelling_niches:
+            return 'storytelling'
+        elif subniche in music_niches:
+            return 'music'
+        elif subniche in history_niches:
+            return 'history'
+        else:
+            # Default para storytelling (maioria dos nossos canais)
+            return 'storytelling'
 
     def analyze_title_patterns(self, subniche: str, period_days: int = 30) -> List[Dict]:
         """
@@ -240,7 +353,7 @@ class Analyzer:
         # Analisa estrutura de cada título
         analyzed_titles = []
         for video in videos:
-            features = self._analyze_title_structure(video['titulo'])
+            features = self._analyze_title_structure(video['titulo'], subniche)
             features['titulo'] = video['titulo']
             features['views'] = video['views_atuais']
             features['video_id'] = video['video_id']
@@ -256,9 +369,17 @@ class Analyzer:
         print(f"[Analyzer] {len(top_5)} padrões identificados para {subniche}")
         return top_5
 
-    def _analyze_title_structure(self, titulo: str) -> Dict:
-        """Analisa características estruturais de um título"""
+    def _analyze_title_structure(self, titulo: str, subniche: str) -> Dict:
+        """
+        Analisa características estruturais de um título
 
+        Args:
+            titulo: Título do vídeo
+            subniche: Subniche para determinar tipo de conteúdo
+
+        Returns:
+            Dict com features detectadas
+        """
         features = {
             'categorias': [],  # Categorias detectadas (FAMÍLIA, TRAGÉDIA, etc)
             'has_money': False,
@@ -273,8 +394,18 @@ class Analyzer:
 
         titulo_lower = titulo.lower()
 
-        # Detecta categorias de palavras
-        for categoria, palavras in self.CATEGORIAS_PALAVRAS.items():
+        # Seleciona dicionário de categorias baseado no tipo de subniche
+        subniche_type = self._get_subniche_type(subniche)
+
+        if subniche_type == 'storytelling':
+            categories_dict = self.CATEGORIAS_STORYTELLING
+        elif subniche_type == 'music':
+            categories_dict = self.CATEGORIAS_MUSICA
+        else:  # history
+            categories_dict = self.CATEGORIAS_HISTORIA
+
+        # Detecta categorias de palavras usando o dicionário correto
+        for categoria, palavras in categories_dict.items():
             for palavra in palavras:
                 if palavra in titulo_lower:
                     if categoria not in features['categorias']:
@@ -507,7 +638,7 @@ class Analyzer:
         nossos_patterns = set()
         for video in nossos_videos:
             titulo = video.get('titulo', '')
-            features = self._analyze_title_structure(titulo)
+            features = self._analyze_title_structure(titulo, subniche)
             # Cria estrutura baseada nas categorias detectadas
             if features['categorias']:
                 cats = sorted(features['categorias'])

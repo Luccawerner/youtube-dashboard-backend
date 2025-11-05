@@ -503,12 +503,16 @@ class Analyzer:
 
         nossos_videos = response.data
 
-        # Detectar padrões dos nossos vídeos
+        # Detectar padrões dos nossos vídeos usando nova lógica
         nossos_patterns = set()
         for video in nossos_videos:
             titulo = video.get('titulo', '')
-            pattern = self._detect_title_pattern(titulo)
-            nossos_patterns.add(pattern)
+            features = self._analyze_title_structure(titulo)
+            # Cria estrutura baseada nas categorias detectadas
+            if features['categorias']:
+                cats = sorted(features['categorias'])
+                pattern = ' + '.join([f'[{cat}]' for cat in cats])
+                nossos_patterns.add(pattern)
 
         # Identificar gaps (padrões que minerados usam mas nós não)
         gaps = []
@@ -519,11 +523,11 @@ class Analyzer:
                 # Gap identificado!
                 gaps.append({
                     'gap_title': f"Padrão não utilizado: {pattern_key}",
-                    'gap_description': pattern['pattern_description'],
+                    'gap_description': f"Concorrentes usam e performam bem",
                     'competitor_count': pattern['video_count'],
                     'avg_views': pattern['avg_views'],
                     'example_videos': [pattern['example_title']],
-                    'recommendation': f"Considere produzir vídeos usando a estrutura: {pattern_key}"
+                    'recommendation': f"Considere produzir vídeos usando a estrutura: {pattern_key}\nExemplo de sucesso: \"{pattern['example_title']}\""
                 })
 
         print(f"[Analyzer] {len(gaps)} gaps identificados para {subniche}")

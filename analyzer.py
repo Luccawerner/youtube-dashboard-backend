@@ -631,24 +631,24 @@ class Analyzer:
         # =====================================================================
         print(f"[Analyzer] Analisando gap de duração...")
 
-        # Nossos vídeos (30k+ views, últimos 30 dias)
+        # Nossos vídeos (10k+ views, últimos 30 dias)
         response_nossos = self.db.table("videos_historico")\
             .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
             .eq("canais_monitorados.tipo", "nosso")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
-            .gte("views_atuais", 30000)\
+            .gte("views_atuais", 10000)\
             .execute()
 
         nossos_videos = response_nossos.data
 
-        # Concorrentes (30k+ views, últimos 30 dias)
+        # Concorrentes (10k+ views, últimos 30 dias)
         response_concorrentes = self.db.table("videos_historico")\
             .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
             .eq("canais_monitorados.tipo", "minerado")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
-            .gte("views_atuais", 30000)\
+            .gte("views_atuais", 10000)\
             .execute()
 
         concorrentes_videos = response_concorrentes.data
@@ -662,14 +662,14 @@ class Analyzer:
                 nossa_avg_duration = sum(nossos_durations) / len(nossos_durations)
                 concorrente_avg_duration = sum(concorrentes_durations) / len(concorrentes_durations)
 
-                # Diferença significativa (> 10min = 600s)
+                # Diferença significativa (> 3min = 180s)
                 diff_seconds = abs(nossa_avg_duration - concorrente_avg_duration)
-                if diff_seconds > 600:
+                if diff_seconds > 180:
                     diff_percent = ((concorrente_avg_duration / nossa_avg_duration - 1) * 100) if nossa_avg_duration > 0 else 0
 
                     gaps.append({
                         'type': 'duration',
-                        'priority': 'high' if diff_seconds > 1200 else 'medium',  # 20min = crítico
+                        'priority': 'high' if diff_seconds > 600 else 'medium',  # 10min = crítico
                         'title': 'Duração dos Vídeos',
                         'your_value': f'{int(nossa_avg_duration // 60)}min',
                         'your_context': 'média atual',
@@ -720,9 +720,9 @@ class Analyzer:
             nossa_freq = len(nossos_canais_videos) / len(nossos_canais_unique) if nossos_canais_unique else 0
             concorrente_freq = len(concorrentes_canais_videos) / len(concorrentes_canais_unique) if concorrentes_canais_unique else 0
 
-            # Diferença significativa (> 2 vídeos/mês)
+            # Diferença significativa (> 1 vídeo/mês)
             diff_videos = abs(nossa_freq - concorrente_freq)
-            if diff_videos > 2:
+            if diff_videos > 1:
                 diff_percent = ((concorrente_freq / nossa_freq - 1) * 100) if nossa_freq > 0 else 0
 
                 gaps.append({
@@ -746,69 +746,10 @@ class Analyzer:
                 })
 
         # =====================================================================
-        # GAP 3: TAXA DE ENGAGEMENT (LIKES/VIEWS)
+        # GAP 3: TAXA DE ENGAGEMENT (DESABILITADO - campo likes_atuais não existe)
         # =====================================================================
-        print(f"[Analyzer] Analisando gap de engagement...")
-
-        # Nossos vídeos com likes
-        response_nossos_eng = self.db.table("videos_historico")\
-            .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
-            .eq("canais_monitorados.tipo", "nosso")\
-            .eq("canais_monitorados.subnicho", subniche)\
-            .gte("data_publicacao", cutoff_date)\
-            .gte("views_atuais", 10000)\
-            .execute()
-
-        nossos_eng = response_nossos_eng.data
-
-        # Concorrentes com likes
-        response_concorrentes_eng = self.db.table("videos_historico")\
-            .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
-            .eq("canais_monitorados.tipo", "minerado")\
-            .eq("canais_monitorados.subnicho", subniche)\
-            .gte("data_publicacao", cutoff_date)\
-            .gte("views_atuais", 10000)\
-            .execute()
-
-        concorrentes_eng = response_concorrentes_eng.data
-
-        if nossos_eng and concorrentes_eng:
-            # Calcular engagement rate (%)
-            nossa_eng_rate = sum([
-                (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
-                for v in nossos_eng if v['views_atuais'] > 0
-            ]) / len(nossos_eng)
-
-            concorrente_eng_rate = sum([
-                (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
-                for v in concorrentes_eng if v['views_atuais'] > 0
-            ]) / len(concorrentes_eng)
-
-            # Diferença significativa (> 0.5%)
-            diff_eng = abs(nossa_eng_rate - concorrente_eng_rate)
-            if diff_eng > 0.5:
-                diff_percent = ((concorrente_eng_rate / nossa_eng_rate - 1) * 100) if nossa_eng_rate > 0 else 0
-
-                gaps.append({
-                    'type': 'engagement',
-                    'priority': 'high' if diff_eng > 1.0 else 'medium',
-                    'title': 'Taxa de Engagement (Likes/Views)',
-                    'your_value': f'{nossa_eng_rate:.2f}%',
-                    'your_context': f'{int(nossa_eng_rate * 400)} likes/40k views',
-                    'competitor_value': f'{concorrente_eng_rate:.2f}%',
-                    'competitor_context': f'{int(concorrente_eng_rate * 400)} likes/40k views',
-                    'difference': diff_percent,
-                    'impact_description': f"+{abs(diff_percent):.0f}% engagement = algoritmo favorece +30-50% alcance",
-                    'actions': [
-                        "Adicionar CTAs fortes nos momentos emocionais altos",
-                        "Pedir likes no início (1-2min) E final do vídeo",
-                        "Responder primeiros 10 comentários em 1h (engajamento)",
-                        "Analisar thumbnails dos top 5 - criar mais expectativa"
-                    ],
-                    'priority_text': 'ALTA' if diff_eng > 1.0 else 'MÉDIA',
-                    'effort': 'Baixo',
-                    'roi': '+30-50% alcance estimado'
-                })
+        # TODO: Implementar quando campo likes estiver disponível na tabela
+        print(f"[Analyzer] Gap de engagement desabilitado (campo likes_atuais não disponível)")
 
         # Ordenar por prioridade e retornar no máximo 2 gaps
         gaps.sort(key=lambda x: {'high': 0, 'medium': 1}.get(x['priority'], 2))

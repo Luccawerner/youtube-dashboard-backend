@@ -14,6 +14,7 @@ Gera relatório semanal completo com:
 from datetime import datetime, timedelta
 from typing import Dict, List
 import json
+from analyzer import Analyzer
 
 
 class ReportGenerator:
@@ -27,6 +28,7 @@ class ReportGenerator:
             db_client: Cliente Supabase para acesso ao banco
         """
         self.db = db_client
+        self.analyzer = Analyzer(db_client)
 
     # =========================================================================
     # GERAÇÃO DO RELATÓRIO COMPLETO
@@ -273,41 +275,43 @@ class ReportGenerator:
 
     def _get_gap_analysis(self) -> Dict:
         """
-        Busca análise de gaps mais recente por subniche
+        Analisa gaps estratégicos em tempo real para cada subniche
 
         Returns:
             Dict com gaps por subniche
         """
-        print("[ReportGenerator] Buscando gap analysis...")
+        print("[ReportGenerator] Analisando gaps estratégicos...")
 
-        # Buscar gaps da semana atual
-        week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).strftime("%Y-%m-%d")
-
-        response = self.db.table("gap_analysis")\
-            .select("*")\
-            .eq("analyzed_week_start", week_start)\
-            .order("avg_views", desc=True)\
+        # Buscar todos os subniches ativos
+        subniches_response = self.db.table("canais_monitorados")\
+            .select("subnicho")\
+            .eq("tipo", "nosso")\
+            .eq("status", "ativo")\
             .execute()
 
-        gaps = response.data
+        subniches = list(set([c['subnicho'] for c in subniches_response.data]))
 
-        # Agrupar por subniche
+        # Analisar gaps para cada subniche
         gaps_by_subniche = {}
-        for gap in gaps:
-            subniche = gap['subniche']
+        total_gaps = 0
 
-            if subniche not in gaps_by_subniche:
+        for subniche in subniches:
+            gaps_list = self.analyzer.analyze_gaps(subniche)
+
+            if gaps_list:
+                # Converter formato novo para formato antigo (compatibilidade)
                 gaps_by_subniche[subniche] = []
+                for gap in gaps_list:
+                    gaps_by_subniche[subniche].append({
+                        'gap_title': gap['title'],
+                        'description': gap['impact_description'],
+                        'competitor_count': 0,  # Não usado mais
+                        'avg_views': 0,  # Não aplicável para gaps de duração/frequência
+                        'recommendation': '\n'.join(gap['actions'])
+                    })
+                total_gaps += len(gaps_list)
 
-            gaps_by_subniche[subniche].append({
-                'gap_title': gap['gap_title'],
-                'description': gap['gap_description'],
-                'competitor_count': gap['competitor_count'],
-                'avg_views': gap['avg_views'],
-                'recommendation': gap['recommendation']
-            })
-
-        print(f"[ReportGenerator] {len(gaps)} gaps encontrados")
+        print(f"[ReportGenerator] {total_gaps} gaps encontrados em {len(gaps_by_subniche)} subniches")
         return gaps_by_subniche
 
     # =========================================================================

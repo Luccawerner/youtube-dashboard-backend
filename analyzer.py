@@ -71,34 +71,40 @@ class Analyzer:
     # ANÁLISE DE KEYWORDS
     # =========================================================================
 
-    def analyze_keywords(self, period_days: int = 30) -> List[Dict]:
+    def analyze_keywords(self, subniche: str = None, period_days: int = 30) -> List[Dict]:
         """
         Analisa keywords mais frequentes nos títulos dos vídeos (vídeos com 50k+ views)
 
         Args:
+            subniche: Subniche específico para analisar (opcional - se None, analisa todos)
             period_days: Período em dias (7, 15 ou 30)
 
         Returns:
             Lista com top 10 keywords ordenadas por performance (views médias)
         """
-        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 50k+ views)...")
+        subniche_text = f"subniche {subniche}" if subniche else "todos os subniches"
+        print(f"[Analyzer] Analisando keywords ({subniche_text}, últimos {period_days} dias, 50k+ views)...")
 
         # Buscar vídeos do período (publicados nos últimos X dias com 50k+ views)
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
-        response = self.db.table("videos_historico")\
-            .select("video_id, titulo, views_atuais, data_publicacao")\
+        query = self.db.table("videos_historico")\
+            .select("video_id, titulo, views_atuais, data_publicacao, canais_monitorados!inner(subnicho)")\
             .gte("data_publicacao", cutoff_date.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 50000)\
-            .execute()
+            .gte("views_atuais", 50000)
 
+        # Se subniche foi especificado, filtrar
+        if subniche:
+            query = query.eq("canais_monitorados.subnicho", subniche)
+
+        response = query.execute()
         videos = response.data
 
         if not videos:
-            print("[Analyzer] Nenhum vídeo encontrado no período com 50k+ views")
+            print(f"[Analyzer] Nenhum vídeo encontrado no período com 50k+ views para {subniche_text}")
             return []
 
-        print(f"[Analyzer] {len(videos)} vídeos encontrados (50k+ views)")
+        print(f"[Analyzer] {len(videos)} vídeos encontrados (50k+ views) em {subniche_text}")
 
         # Extrair keywords de todos os títulos
         keyword_stats = {}  # {keyword: {'count': int, 'total_views': int, 'video_ids': set}}

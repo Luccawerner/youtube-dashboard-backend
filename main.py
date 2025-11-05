@@ -1299,16 +1299,19 @@ async def run_daily_analysis_job():
         analyzer = Analyzer(db.supabase)
         subniches = await db.get_all_subniches()
 
-        # Keywords
-        for days in [30, 15, 7]:
-            keywords = analyzer.analyze_keywords(period_days=days)
-            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
-
-        # Patterns e channels por subniche
+        # Keywords, Patterns e Channels POR SUBNICHE
         for subniche in subniches:
+            # Keywords por subniche
+            for days in [30, 15, 7]:
+                keywords = analyzer.analyze_keywords(subniche=subniche, period_days=days)
+                save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days, subniche=subniche)
+
+            # Patterns por subniche
             for days in [30, 15, 7]:
                 patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
                 save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
+
+            # Channels por subniche
             channels = analyzer.analyze_top_channels(subniche)
             save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
 
@@ -1370,16 +1373,19 @@ async def run_daily_analysis_job():
         analyzer = Analyzer(db.supabase)
         subniches = await db.get_all_subniches()
 
-        # Keywords
-        for days in [30, 15, 7]:
-            keywords = analyzer.analyze_keywords(period_days=days)
-            save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days)
-
-        # Patterns e channels por subniche
+        # Keywords, Patterns e Channels POR SUBNICHE
         for subniche in subniches:
+            # Keywords por subniche
+            for days in [30, 15, 7]:
+                keywords = analyzer.analyze_keywords(subniche=subniche, period_days=days)
+                save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days, subniche=subniche)
+
+            # Patterns por subniche
             for days in [30, 15, 7]:
                 patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
                 save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
+
+            # Channels por subniche
             channels = analyzer.analyze_top_channels(subniche)
             save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
 

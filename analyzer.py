@@ -73,7 +73,7 @@ class Analyzer:
 
     def analyze_keywords(self, period_days: int = 30) -> List[Dict]:
         """
-        Analisa keywords mais frequentes nos títulos dos vídeos (apenas vídeos VIRAIS 100k+ views)
+        Analisa keywords mais frequentes nos títulos dos vídeos (vídeos com 50k+ views)
 
         Args:
             period_days: Período em dias (7, 15 ou 30)
@@ -81,24 +81,24 @@ class Analyzer:
         Returns:
             Lista com top 10 keywords ordenadas por performance (views médias)
         """
-        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 100k+ views virais)...")
+        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 50k+ views)...")
 
-        # Buscar vídeos do período (publicados nos últimos X dias com 100k+ views - VIRAIS!)
+        # Buscar vídeos do período (publicados nos últimos X dias com 50k+ views)
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
         response = self.db.table("videos_historico")\
             .select("video_id, titulo, views_atuais, data_publicacao")\
             .gte("data_publicacao", cutoff_date.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 100000)\
+            .gte("views_atuais", 50000)\
             .execute()
 
         videos = response.data
 
         if not videos:
-            print("[Analyzer] Nenhum vídeo encontrado no período com 100k+ views")
+            print("[Analyzer] Nenhum vídeo encontrado no período com 50k+ views")
             return []
 
-        print(f"[Analyzer] {len(videos)} vídeos virais encontrados (100k+ views)")
+        print(f"[Analyzer] {len(videos)} vídeos encontrados (50k+ views)")
 
         # Extrair keywords de todos os títulos
         keyword_stats = {}  # {keyword: {'count': int, 'total_views': int, 'video_ids': set}}
@@ -314,11 +314,10 @@ class Analyzer:
         Detecta padrões de título automaticamente (GRATUITO - sem IA)
 
         Estratégia:
-        1. Busca vídeos com 30k+ views (publicados últimos 30 dias)
-        2. Prioriza dados coletados nos últimos 7 dias (performance recente)
-        3. Analisa estrutura: categoriza palavras, detecta CAPS, dinheiro, citações
-        4. Agrupa títulos similares por características
-        5. Retorna top 5 padrões com estrutura simples: [CAT1] + [CAT2] + [CAT3]
+        1. Busca TODOS os vídeos com 50k+ views do subniche (últimos 30 dias publicação)
+        2. Analisa estrutura: categoriza palavras, detecta CAPS, dinheiro, citações
+        3. Agrupa títulos similares por características
+        4. Retorna top 5 padrões com estrutura simples: [CAT1] + [CAT2] + [CAT3]
 
         Args:
             subniche: Subniche a analisar
@@ -327,46 +326,26 @@ class Analyzer:
         Returns:
             Lista com top 5 padrões: structure, example_title, avg_views, video_count
         """
-        print(f"[Analyzer] Analisando padrões de título ({subniche}, {period_days} dias, 30k+ views)...")
+        print(f"[Analyzer] Analisando padrões de título ({subniche}, últimos 30 dias, 50k+ views, SEM LIMITE)...")
 
-        # PRIORIDADE 1: Vídeos com dados coletados nos últimos 7 dias
-        cutoff_publication = datetime.now() - timedelta(days=30)  # Publicados últimos 30 dias
-        cutoff_collection = datetime.now() - timedelta(days=7)   # Coletados últimos 7 dias
+        # Buscar TODOS os vídeos do subniche (últimos 30 dias publicação, 50k+ views)
+        cutoff_publication = datetime.now() - timedelta(days=30)
 
-        response_recent = self.db.table("videos_historico")\
+        response = self.db.table("videos_historico")\
             .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
-            .gte("data_coleta", cutoff_collection.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 30000)\
+            .gte("views_atuais", 50000)\
             .order("views_atuais", desc=True)\
-            .limit(100)\
             .execute()
 
-        videos = response_recent.data
-
-        # Se temos poucos vídeos recentes, complementa com últimos 30 dias
-        if len(videos) < 20:
-            response_older = self.db.table("videos_historico")\
-                .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
-                .eq("canais_monitorados.subnicho", subniche)\
-                .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
-                .gte("views_atuais", 30000)\
-                .order("views_atuais", desc=True)\
-                .limit(100)\
-                .execute()
-
-            # Mescla sem duplicar
-            existing_ids = {v['video_id'] for v in videos}
-            for v in response_older.data:
-                if v['video_id'] not in existing_ids:
-                    videos.append(v)
+        videos = response.data
 
         if not videos:
-            print(f"[Analyzer] Nenhum vídeo 30k+ encontrado para {subniche}")
+            print(f"[Analyzer] Nenhum vídeo 50k+ encontrado para {subniche}")
             return []
 
-        print(f"[Analyzer] {len(videos)} vídeos encontrados para análise")
+        print(f"[Analyzer] {len(videos)} vídeos encontrados para análise (TODOS do subniche)")
 
         # Analisa estrutura de cada título
         analyzed_titles = []

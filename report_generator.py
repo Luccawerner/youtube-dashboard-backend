@@ -286,6 +286,176 @@ class ReportGenerator:
         return gaps_by_subniche
 
     # =========================================================================
+    # ANÁLISES AVANÇADAS (ALÉM DE TÍTULOS)
+    # =========================================================================
+
+    def _analyze_upload_frequency(self) -> Dict:
+        """
+        Analisa frequência de upload nossos canais vs concorrentes (últimos 30 dias)
+
+        Returns:
+            Dict com análise de frequência por subniche
+        """
+        print("[ReportGenerator] Analisando frequência de upload...")
+
+        cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        # Buscar subniches
+        response_subniches = self.db.table("canais_monitorados")\
+            .select("DISTINCT subnicho")\
+            .execute()
+
+        subniches = [item['subnicho'] for item in response_subniches.data]
+
+        frequency_analysis = {}
+
+        for subniche in subniches:
+            # Nossos canais
+            response_nossos = self.db.table("videos_historico")\
+                .select("canal_id, canais_monitorados!inner(nome_canal, tipo, subnicho)")\
+                .eq("canais_monitorados.tipo", "nosso")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_date)\
+                .execute()
+
+            nossos_videos = response_nossos.data
+            nossos_canais = set([v['canal_id'] for v in nossos_videos])
+            nossos_frequency = len(nossos_videos) / len(nossos_canais) if nossos_canais else 0
+
+            # Concorrentes
+            response_concorrentes = self.db.table("videos_historico")\
+                .select("canal_id, canais_monitorados!inner(nome_canal, tipo, subnicho)")\
+                .eq("canais_monitorados.tipo", "minerado")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_date)\
+                .execute()
+
+            concorrentes_videos = response_concorrentes.data
+            concorrentes_canais = set([v['canal_id'] for v in concorrentes_videos])
+            concorrentes_frequency = len(concorrentes_videos) / len(concorrentes_canais) if concorrentes_canais else 0
+
+            if nossos_frequency > 0 and concorrentes_frequency > 0:
+                frequency_analysis[subniche] = {
+                    'nossos_videos_per_canal': round(nossos_frequency, 1),
+                    'concorrentes_videos_per_canal': round(concorrentes_frequency, 1),
+                    'difference': round(concorrentes_frequency - nossos_frequency, 1)
+                }
+
+        print(f"[ReportGenerator] Análise de frequência concluída para {len(frequency_analysis)} subniches")
+        return frequency_analysis
+
+    def _analyze_engagement(self) -> Dict:
+        """
+        Analisa taxa de engajamento (likes/views) nossos vs concorrentes
+
+        Returns:
+            Dict com análise de engagement por subniche
+        """
+        print("[ReportGenerator] Analisando engagement...")
+
+        cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        # Buscar subniches
+        response_subniches = self.db.table("canais_monitorados")\
+            .select("DISTINCT subnicho")\
+            .execute()
+
+        subniches = [item['subnicho'] for item in response_subniches.data]
+
+        engagement_analysis = {}
+
+        for subniche in subniches:
+            # Nossos canais
+            response_nossos = self.db.table("videos_historico")\
+                .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+                .eq("canais_monitorados.tipo", "nosso")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_date)\
+                .gte("views_atuais", 1000)\
+                .execute()
+
+            nossos_videos = response_nossos.data
+
+            # Concorrentes
+            response_concorrentes = self.db.table("videos_historico")\
+                .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+                .eq("canais_monitorados.tipo", "minerado")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_date)\
+                .gte("views_atuais", 1000)\
+                .execute()
+
+            concorrentes_videos = response_concorrentes.data
+
+            if nossos_videos and concorrentes_videos:
+                # Calcular taxa de engagement
+                nossos_engagement = sum([
+                    (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                    for v in nossos_videos if v['views_atuais'] > 0
+                ]) / len(nossos_videos)
+
+                concorrentes_engagement = sum([
+                    (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                    for v in concorrentes_videos if v['views_atuais'] > 0
+                ]) / len(concorrentes_videos)
+
+                engagement_analysis[subniche] = {
+                    'nossos_engagement_rate': round(nossos_engagement, 2),
+                    'concorrentes_engagement_rate': round(concorrentes_engagement, 2),
+                    'difference': round(concorrentes_engagement - nossos_engagement, 2)
+                }
+
+        print(f"[ReportGenerator] Análise de engagement concluída para {len(engagement_analysis)} subniches")
+        return engagement_analysis
+
+    def _analyze_video_duration(self) -> Dict:
+        """
+        Analisa duração média dos vídeos de sucesso (50k+ views)
+
+        Returns:
+            Dict com duração média por subniche
+        """
+        print("[ReportGenerator] Analisando duração de vídeos...")
+
+        cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        # Buscar subniches
+        response_subniches = self.db.table("canais_monitorados")\
+            .select("DISTINCT subnicho")\
+            .execute()
+
+        subniches = [item['subnicho'] for item in response_subniches.data]
+
+        duration_analysis = {}
+
+        for subniche in subniches:
+            # Vídeos de sucesso (50k+ views)
+            response = self.db.table("videos_historico")\
+                .select("duracao, views_atuais, canais_monitorados!inner(subnicho, tipo)")\
+                .eq("canais_monitorados.subnicho", subniche)\
+                .gte("data_publicacao", cutoff_date)\
+                .gte("views_atuais", 50000)\
+                .execute()
+
+            videos = response.data
+
+            if videos:
+                # Calcular duração média
+                durations = [v.get('duracao', 0) for v in videos if v.get('duracao', 0) > 0]
+
+                if durations:
+                    avg_duration = sum(durations) / len(durations)
+
+                    duration_analysis[subniche] = {
+                        'avg_duration_seconds': round(avg_duration, 0),
+                        'avg_duration_minutes': round(avg_duration / 60, 1),
+                        'video_count': len(durations)
+                    }
+
+        print(f"[ReportGenerator] Análise de duração concluída para {len(duration_analysis)} subniches")
+        return duration_analysis
+
+    # =========================================================================
     # AÇÕES RECOMENDADAS
     # =========================================================================
 
@@ -417,12 +587,73 @@ class ReportGenerator:
                 'effort': 'Baixo'
             })
 
+        # =====================================================================
+        # 6. FREQUÊNCIA DE UPLOAD - Análise Comparativa
+        # =====================================================================
+        frequency_data = self._analyze_upload_frequency()
+
+        for subniche, data in list(frequency_data.items())[:2]:
+            if data['difference'] > 3:  # Concorrentes postam 3+ vídeos a mais por canal
+                recommendations.append({
+                    'priority': 'high',
+                    'category': 'FREQUÊNCIA - AJUSTAR',
+                    'title': f"📅 Frequência de upload baixa em {subniche}",
+                    'description': f"Concorrentes postam {data['concorrentes_videos_per_canal']:.1f} vídeos/canal vs nossos {data['nossos_videos_per_canal']:.1f} (últimos 30 dias). Diferença de {data['difference']:.1f} vídeos/canal.",
+                    'action': f"1) Aumentar produção de {subniche} para igualar concorrentes\n2) Se não conseguir produzir mais, priorizar qualidade sobre quantidade\n3) Considerar contratar editor adicional ou otimizar fluxo de produção\n4) Avaliar se falta de consistência afeta algoritmo do YouTube",
+                    'impact': 'ALTO',
+                    'effort': 'Alto'
+                })
+            elif data['difference'] < -3:  # Estamos postando muito mais
+                recommendations.append({
+                    'priority': 'medium',
+                    'category': 'FREQUÊNCIA - OTIMIZAR',
+                    'title': f"📹 Excesso de uploads em {subniche}",
+                    'description': f"Estamos postando {data['nossos_videos_per_canal']:.1f} vídeos/canal vs {data['concorrentes_videos_per_canal']:.1f} dos concorrentes (últimos 30 dias).",
+                    'action': f"Avaliar se o excesso de uploads está afetando qualidade ou engagement. Considerar reduzir frequência e focar em vídeos com maior potencial de views.",
+                    'impact': 'MÉDIO',
+                    'effort': 'Baixo'
+                })
+
+        # =====================================================================
+        # 7. ENGAGEMENT (LIKES/VIEWS) - Análise Comparativa
+        # =====================================================================
+        engagement_data = self._analyze_engagement()
+
+        for subniche, data in list(engagement_data.items())[:2]:
+            if data['difference'] > 0.5:  # Concorrentes têm 0.5%+ engagement a mais
+                recommendations.append({
+                    'priority': 'high',
+                    'category': 'ENGAGEMENT - MELHORAR',
+                    'title': f"👍 Baixo engagement em {subniche}",
+                    'description': f"Taxa de likes nossos: {data['nossos_engagement_rate']:.2f}% vs concorrentes: {data['concorrentes_engagement_rate']:.2f}%. Diferença de {data['difference']:.2f}%.",
+                    'action': f"1) Adicionar CTAs (Call To Action) mais fortes nos vídeos de {subniche}\n2) Pedir likes/comments de forma natural no início E fim do vídeo\n3) Criar momentos mais \"meme-áveis\" ou emocionais que incentivem reação\n4) Responder mais comentários para estimular comunidade\n5) Analisar thumbnails - podem não estar gerando expectativa suficiente",
+                    'impact': 'ALTO',
+                    'effort': 'Médio'
+                })
+
+        # =====================================================================
+        # 8. DURAÇÃO DE VÍDEOS - Análise de Sucesso
+        # =====================================================================
+        duration_data = self._analyze_video_duration()
+
+        for subniche, data in list(duration_data.items())[:2]:
+            if data['avg_duration_minutes'] > 0:
+                recommendations.append({
+                    'priority': 'medium',
+                    'category': 'DURAÇÃO - INSIGHT',
+                    'title': f"⏱️ Duração ideal para {subniche}",
+                    'description': f"Vídeos de sucesso (50k+ views) em {subniche} têm média de {data['avg_duration_minutes']:.1f} minutos ({data['video_count']} vídeos analisados).",
+                    'action': f"Usar {data['avg_duration_minutes']:.1f} minutos como referência para novos vídeos de {subniche}. Vídeos muito mais curtos ou longos podem performar pior.",
+                    'impact': 'MÉDIO',
+                    'effort': 'Baixo'
+                })
+
         # Ordenar por prioridade
         priority_order = {'urgent': 0, 'high': 1, 'medium': 2}
         recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
 
         print(f"[ReportGenerator] {len(recommendations)} recomendações estratégicas geradas")
-        return recommendations[:8]  # Top 8 recomendações mais importantes
+        return recommendations[:12]  # Top 12 recomendações mais importantes
 
     # =========================================================================
     # SALVAR RELATÓRIO

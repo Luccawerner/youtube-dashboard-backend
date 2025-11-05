@@ -781,3 +781,119 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error saving transcription cache: {e}")
             return None
+
+    # =========================================================================
+    # ANALYSIS TAB - New Functions
+    # Added by Claude Code - 2024-11-05
+    # =========================================================================
+
+    async def get_keyword_analysis(self, period_days: int = 30) -> List[Dict]:
+        """Busca análise de keywords mais recente"""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            response = self.supabase.table("keyword_analysis")\
+                .select("*")\
+                .eq("period_days", period_days)\
+                .eq("analyzed_date", today)\
+                .order("frequency", desc=True)\
+                .limit(20)\
+                .execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar keyword analysis: {e}")
+            return []
+
+    async def get_title_patterns(self, subniche: str, period_days: int = 30) -> List[Dict]:
+        """Busca padrões de título por subniche"""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            response = self.supabase.table("title_patterns")\
+                .select("*")\
+                .eq("subniche", subniche)\
+                .eq("period_days", period_days)\
+                .eq("analyzed_date", today)\
+                .order("avg_views", desc=True)\
+                .limit(5)\
+                .execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar title patterns: {e}")
+            return []
+
+    async def get_top_channels_snapshot(self, subniche: str) -> List[Dict]:
+        """Busca top 5 canais por subniche (snapshot mais recente)"""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            response = self.supabase.table("top_channels_snapshot")\
+                .select("*, canais_monitorados!inner(nome_canal, url_canal)")\
+                .eq("subniche", subniche)\
+                .eq("snapshot_date", today)\
+                .order("rank_position", desc=False)\
+                .limit(5)\
+                .execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar top channels: {e}")
+            return []
+
+    async def get_gap_analysis(self, subniche: str = None) -> List[Dict]:
+        """Busca gap analysis mais recente"""
+        try:
+            week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).strftime("%Y-%m-%d")
+            
+            query = self.supabase.table("gap_analysis")\
+                .select("*")\
+                .eq("analyzed_week_start", week_start)
+            
+            if subniche:
+                query = query.eq("subniche", subniche)
+            
+            response = query.order("avg_views", desc=True).execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar gap analysis: {e}")
+            return []
+
+    async def get_weekly_report_latest(self) -> Optional[Dict]:
+        """Busca o relatório semanal mais recente"""
+        try:
+            response = self.supabase.table("weekly_reports")\
+                .select("*")\
+                .order("week_start", desc=True)\
+                .limit(1)\
+                .execute()
+            
+            if response.data:
+                import json
+                report = response.data[0]
+                report['report_data'] = json.loads(report['report_data'])
+                return report
+            
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao buscar weekly report: {e}")
+            return None
+
+    async def get_all_subniches(self) -> List[str]:
+        """Busca lista de todos os subniches ativos"""
+        try:
+            response = self.supabase.table("canais_monitorados")\
+                .select("subnicho")\
+                .eq("status", "ativo")\
+                .execute()
+            
+            if response.data:
+                subniches = list(set([c['subnicho'] for c in response.data]))
+                return sorted(subniches)
+            
+            return []
+        except Exception as e:
+            logger.error(f"Erro ao buscar subniches: {e}")
+            return []

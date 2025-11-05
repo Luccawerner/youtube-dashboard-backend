@@ -697,16 +697,24 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
     elif analysis_type == 'patterns':
         # Salvar em title_patterns
         for item in data:
-            db_client.table("title_patterns").upsert({
+            # Primeiro, deletar registros antigos para esse subniche/period/date
+            db_client.table("title_patterns").delete()\
+                .eq('subniche', subniche)\
+                .eq('period_days', period_days)\
+                .eq('analyzed_date', today)\
+                .execute()
+
+            # Inserir novo registro
+            db_client.table("title_patterns").insert({
                 'subniche': subniche,
                 'period_days': period_days,
                 'pattern_structure': item['pattern_structure'],
-                'pattern_description': item['pattern_description'],
+                'pattern_description': '',  # Campo vazio (não usado mais)
                 'example_title': item['example_title'],
                 'avg_views': item['avg_views'],
                 'video_count': item['video_count'],
                 'analyzed_date': today
-            }, on_conflict='subniche,pattern_structure,period_days,analyzed_date').execute()
+            }).execute()
 
     elif analysis_type == 'channels':
         # Salvar em top_channels_snapshot

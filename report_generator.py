@@ -70,7 +70,9 @@ class ReportGenerator:
 
     def _get_top_10_videos(self, tipo_canal: str, week_start: str, week_end: str) -> List[Dict]:
         """
-        Busca top 10 vídeos por tipo de canal (nossos ou minerados)
+        Busca top 10 vídeos ÚNICOS por tipo de canal (nossos ou minerados)
+
+        IMPORTANTE: Agrupa por video_id para evitar duplicatas (mesmo vídeo em múltiplos dias)
 
         Args:
             tipo_canal: 'nosso' ou 'minerado'
@@ -78,29 +80,48 @@ class ReportGenerator:
             week_end: Data fim da semana
 
         Returns:
-            Lista com top 10 vídeos ordenados por views dos últimos 7 dias
+            Lista com top 10 vídeos ÚNICOS ordenados por views (sem repetições)
         """
-        print(f"[ReportGenerator] Buscando top 10 vídeos ({tipo_canal})...")
+        print(f"[ReportGenerator] Buscando top 10 vídeos ÚNICOS ({tipo_canal})...")
 
-        # Buscar vídeos postados nos últimos 30 dias
+        # Buscar vídeos postados nos últimos 30 dias com 10k+ views
         cutoff_date_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        # Query: vídeos postados nos últimos 30 dias, ordenados por views dos últimos 7 dias
+        # Query: buscar TODOS os vídeos (não limitar ainda)
         response = self.db.table("videos_historico")\
             .select("*, canais_monitorados!inner(nome_canal, tipo, id)")\
             .eq("canais_monitorados.tipo", tipo_canal)\
             .gte("data_publicacao", cutoff_date_30d)\
+            .gte("views_atuais", 10000)\
             .gte("data_coleta", week_start)\
             .lte("data_coleta", week_end)\
             .order("views_atuais", desc=True)\
-            .limit(10)\
             .execute()
 
-        videos = response.data
+        all_videos = response.data
+
+        # AGRUPAR por video_id pegando registro mais recente (evita duplicatas)
+        videos_dict = {}
+        for video in all_videos:
+            video_id = video['video_id']
+
+            if video_id not in videos_dict:
+                videos_dict[video_id] = video
+            else:
+                # Se já existe, pega o mais recente (data_coleta mais recente)
+                if video['data_coleta'] > videos_dict[video_id]['data_coleta']:
+                    videos_dict[video_id] = video
+
+        # Converter dict para lista e ordenar por views
+        unique_videos = list(videos_dict.values())
+        unique_videos.sort(key=lambda x: x['views_atuais'], reverse=True)
+
+        # Pegar top 10
+        top_10 = unique_videos[:10]
 
         # Calcular inscritos ganhos para cada canal nos últimos 7 dias
         result = []
-        for video in videos:
+        for video in top_10:
             canal_id = video['canais_monitorados']['id']
 
             # Buscar dados do canal nos últimos 7 dias
@@ -110,12 +131,16 @@ class ReportGenerator:
                 'video_id': video['video_id'],
                 'titulo': video['titulo'],
                 'canal_nome': video['canais_monitorados']['nome_canal'],
+                'canal_id': canal_id,
+                'views_atuais': video['views_atuais'],
+                'likes_atuais': video.get('likes_atuais', 0),
+                'duracao': video.get('duracao', 0),
                 'views_7d': video['views_atuais'],
                 'subscribers_gained_7d': subs_gained,
-                'url_video': video.get('url_video', '')
+                'url_video': video.get('url_video', f"https://youtube.com/watch?v={video['video_id']}")
             })
 
-        print(f"[ReportGenerator] {len(result)} vídeos encontrados ({tipo_canal})")
+        print(f"[ReportGenerator] {len(result)} vídeos ÚNICOS encontrados ({tipo_canal})")
         return result
 
     def _get_subscribers_gained(self, canal_id: int, days: int) -> int:

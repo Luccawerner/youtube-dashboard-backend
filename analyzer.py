@@ -18,24 +18,40 @@ import json
 
 # Stop words expandido (português + inglês + termos genéricos)
 STOP_WORDS = {
-    # Inglês básico
-    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
+    # Inglês básico - artigos, preposições, conjunções
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he', 'she',
     'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 'to', 'was', 'will', 'with',
     'but', 'when', 'they', 'until', 'who', 'what', 'where', 'why', 'how', 'this',
     'these', 'those', 'then', 'than', 'have', 'had', 'been', 'being', 'do', 'does',
     'did', 'or', 'if', 'can', 'could', 'would', 'should', 'may', 'might', 'not',
+    'we', 'us', 'our', 'ours', 'you', 'your', 'yours', 'him', 'his', 'her', 'hers',
+    'them', 'their', 'theirs', 'me', 'my', 'mine', 'myself', 'yourself', 'himself',
+    'herself', 'itself', 'ourselves', 'themselves',
+
+    # Verbos comuns (não são keywords relevantes)
+    'said', 'told', 'asked', 'gave', 'made', 'went', 'got', 'took', 'came', 'put',
+    'thought', 'looked', 'wanted', 'used', 'found', 'knew', 'called', 'tried',
+    'left', 'felt', 'became', 'seemed', 'turned', 'kept', 'began', 'brought',
+    'happened', 'showed', 'heard', 'needed', 'moved', 'lived', 'believed', 'held',
+    'saw', 'let', 'met', 'ran', 'paid', 'sat', 'spoke', 'stood', 'understood',
 
     # Português básico
     'o', 'a', 'os', 'as', 'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na', 'nos',
     'nas', 'por', 'para', 'com', 'sem', 'sob', 'sobre', 'um', 'uma', 'uns', 'umas',
     'e', 'ou', 'mas', 'que', 'se', 'quando', 'como', 'onde', 'porque', 'qual',
-    'meu', 'minha', 'meus', 'minhas', 'seu', 'sua', 'seus', 'suas',
+    'meu', 'minha', 'meus', 'minhas', 'seu', 'sua', 'seus', 'suas', 'ele', 'ela',
+    'eles', 'elas', 'nós', 'vós', 'lhe', 'lhes', 'me', 'te', 'nos', 'vos',
+
+    # Verbos comuns português
+    'disse', 'falou', 'fez', 'foi', 'era', 'tinha', 'estava', 'fui', 'deu', 'viu',
+    'sabia', 'pode', 'podia', 'deve', 'quer', 'quis', 'sabe', 'vai', 'vou', 'tem',
+    'ser', 'estar', 'ter', 'fazer', 'dar', 'ver', 'saber', 'poder', 'dever', 'querer',
 
     # Termos genéricos de vídeo
     'music', 'video', 'channel', 'new', 'best', 'top', 'hour', 'hours', 'minute',
     'minutes', 'full', 'hd', 'hq', '1080p', '720p', '4k', '2024', '2023', '2022',
     '2025', 'watch', 'subscribe', 'like', 'comment', 'share', 'playlist', 'official',
-    'vídeo', 'canal', 'completo', 'novo', 'nova', 'melhor', 'melhores'
+    'vídeo', 'canal', 'completo', 'novo', 'nova', 'melhor', 'melhores', 'compilation'
 }
 
 
@@ -57,32 +73,32 @@ class Analyzer:
 
     def analyze_keywords(self, period_days: int = 30) -> List[Dict]:
         """
-        Analisa keywords mais frequentes nos títulos dos vídeos (apenas vídeos 50k+ views)
+        Analisa keywords mais frequentes nos títulos dos vídeos (apenas vídeos VIRAIS 100k+ views)
 
         Args:
             period_days: Período em dias (7, 15 ou 30)
 
         Returns:
-            Lista com top 10 keywords ordenadas por frequência × performance
+            Lista com top 10 keywords ordenadas por performance (views médias)
         """
-        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 50k+ views)...")
+        print(f"[Analyzer] Analisando keywords (últimos {period_days} dias, 100k+ views virais)...")
 
-        # Buscar vídeos do período (publicados nos últimos X dias com 50k+ views)
+        # Buscar vídeos do período (publicados nos últimos X dias com 100k+ views - VIRAIS!)
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
         response = self.db.table("videos_historico")\
             .select("video_id, titulo, views_atuais, data_publicacao")\
             .gte("data_publicacao", cutoff_date.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 50000)\
+            .gte("views_atuais", 100000)\
             .execute()
 
         videos = response.data
 
         if not videos:
-            print("[Analyzer] Nenhum vídeo encontrado no período com 50k+ views")
+            print("[Analyzer] Nenhum vídeo encontrado no período com 100k+ views")
             return []
 
-        print(f"[Analyzer] {len(videos)} vídeos encontrados com 50k+ views")
+        print(f"[Analyzer] {len(videos)} vídeos virais encontrados (100k+ views)")
 
         # Extrair keywords de todos os títulos
         keyword_stats = {}  # {keyword: {'count': int, 'total_views': int, 'video_ids': set}}
@@ -114,11 +130,13 @@ class Analyzer:
         # Calcular score e ordenar
         keyword_list = []
         for keyword, stats in keyword_stats.items():
-            avg_views = stats['total_views'] // stats['count'] if stats['count'] > 0 else 0
             video_count = len(stats['videos'])
 
-            # Score: frequência × sqrt(views médias) - favorece keywords com boa performance
-            score = stats['count'] * (avg_views ** 0.5)
+            # CORREÇÃO: avg_views = total / número de VÍDEOS únicos (não ocorrências)
+            avg_views = stats['total_views'] // video_count if video_count > 0 else 0
+
+            # Score: performance médias ** 0.7 × √(vídeos únicos) - prioriza keywords com alta performance
+            score = (avg_views ** 0.7) * (video_count ** 0.5)
 
             keyword_list.append({
                 'keyword': keyword,
@@ -296,7 +314,7 @@ class Analyzer:
         Detecta padrões de título automaticamente (GRATUITO - sem IA)
 
         Estratégia:
-        1. Busca vídeos com 50k+ views (publicados últimos 30 dias)
+        1. Busca vídeos com 30k+ views (publicados últimos 30 dias)
         2. Prioriza dados coletados nos últimos 7 dias (performance recente)
         3. Analisa estrutura: categoriza palavras, detecta CAPS, dinheiro, citações
         4. Agrupa títulos similares por características
@@ -309,7 +327,7 @@ class Analyzer:
         Returns:
             Lista com top 5 padrões: structure, example_title, avg_views, video_count
         """
-        print(f"[Analyzer] Analisando padrões de título ({subniche}, {period_days} dias, 50k+ views)...")
+        print(f"[Analyzer] Analisando padrões de título ({subniche}, {period_days} dias, 30k+ views)...")
 
         # PRIORIDADE 1: Vídeos com dados coletados nos últimos 7 dias
         cutoff_publication = datetime.now() - timedelta(days=30)  # Publicados últimos 30 dias
@@ -320,9 +338,9 @@ class Analyzer:
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
             .gte("data_coleta", cutoff_collection.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 50000)\
+            .gte("views_atuais", 30000)\
             .order("views_atuais", desc=True)\
-            .limit(50)\
+            .limit(100)\
             .execute()
 
         videos = response_recent.data
@@ -333,9 +351,9 @@ class Analyzer:
                 .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
                 .eq("canais_monitorados.subnicho", subniche)\
                 .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
-                .gte("views_atuais", 50000)\
+                .gte("views_atuais", 30000)\
                 .order("views_atuais", desc=True)\
-                .limit(50)\
+                .limit(100)\
                 .execute()
 
             # Mescla sem duplicar
@@ -345,7 +363,7 @@ class Analyzer:
                     videos.append(v)
 
         if not videos:
-            print(f"[Analyzer] Nenhum vídeo 50k+ encontrado para {subniche}")
+            print(f"[Analyzer] Nenhum vídeo 30k+ encontrado para {subniche}")
             return []
 
         print(f"[Analyzer] {len(videos)} vídeos encontrados para análise")
@@ -468,7 +486,7 @@ class Analyzer:
 
         # Para cada grupo, cria um padrão
         for categories_tuple, items in category_groups.items():
-            if len(items) < 3:  # Mínimo 3 vídeos para ser considerado padrão
+            if len(items) < 2:  # Mínimo 2 vídeos para ser considerado padrão
                 continue
 
             # Calcula métricas
@@ -610,59 +628,214 @@ class Analyzer:
 
     def analyze_gaps(self, subniche: str) -> List[Dict]:
         """
-        Identifica gaps (o que concorrentes fazem que nós não fazemos)
+        Identifica gaps ESTRATÉGICOS (o que concorrentes fazem que nós não fazemos)
+
+        Analisa 4 dimensões:
+        1. Duração dos vídeos
+        2. Frequência de upload
+        3. Taxa de engagement (likes/views)
+        4. Padrões de título (menos prioritário)
 
         Args:
             subniche: Subniche a analisar
 
         Returns:
-            Lista de oportunidades/gaps identificados
+            Lista com no máximo 2 gaps mais importantes
         """
-        print(f"[Analyzer] Analisando gaps ({subniche})...")
+        print(f"[Analyzer] Analisando gaps ESTRATÉGICOS ({subniche})...")
 
-        # Buscar padrões dos canais minerados
-        minerados_patterns = self.analyze_title_patterns(subniche, period_days=30)
+        gaps = []
+        cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        # Buscar padrões dos nossos canais
-        # (Para isso, precisamos modificar a query para buscar tipo='nosso')
-        response = self.db.table("videos_historico")\
-            .select("*, canais_monitorados!inner(subnicho, tipo)")\
-            .eq("canais_monitorados.subnicho", subniche)\
+        # =====================================================================
+        # GAP 1: DURAÇÃO DOS VÍDEOS
+        # =====================================================================
+        print(f"[Analyzer] Analisando gap de duração...")
+
+        # Nossos vídeos (30k+ views, últimos 30 dias)
+        response_nossos = self.db.table("videos_historico")\
+            .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
             .eq("canais_monitorados.tipo", "nosso")\
-            .gte("data_coleta", (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .gte("views_atuais", 30000)\
             .execute()
 
-        nossos_videos = response.data
+        nossos_videos = response_nossos.data
 
-        # Detectar padrões dos nossos vídeos usando nova lógica
-        nossos_patterns = set()
-        for video in nossos_videos:
-            titulo = video.get('titulo', '')
-            features = self._analyze_title_structure(titulo, subniche)
-            # Cria estrutura baseada nas categorias detectadas
-            if features['categorias']:
-                cats = sorted(features['categorias'])
-                pattern = ' + '.join([f'[{cat}]' for cat in cats])
-                nossos_patterns.add(pattern)
+        # Concorrentes (30k+ views, últimos 30 dias)
+        response_concorrentes = self.db.table("videos_historico")\
+            .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
+            .eq("canais_monitorados.tipo", "minerado")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .gte("views_atuais", 30000)\
+            .execute()
 
-        # Identificar gaps (padrões que minerados usam mas nós não)
-        gaps = []
-        for pattern in minerados_patterns:
-            pattern_key = pattern['pattern_structure']
+        concorrentes_videos = response_concorrentes.data
 
-            if pattern_key not in nossos_patterns:
-                # Gap identificado!
+        if nossos_videos and concorrentes_videos:
+            # Calcula duração média (em segundos)
+            nossos_durations = [v.get('duracao', 0) for v in nossos_videos if v.get('duracao', 0) > 0]
+            concorrentes_durations = [v.get('duracao', 0) for v in concorrentes_videos if v.get('duracao', 0) > 0]
+
+            if nossos_durations and concorrentes_durations:
+                nossa_avg_duration = sum(nossos_durations) / len(nossos_durations)
+                concorrente_avg_duration = sum(concorrentes_durations) / len(concorrentes_durations)
+
+                # Diferença significativa (> 10min = 600s)
+                diff_seconds = abs(nossa_avg_duration - concorrente_avg_duration)
+                if diff_seconds > 600:
+                    diff_percent = ((concorrente_avg_duration / nossa_avg_duration - 1) * 100) if nossa_avg_duration > 0 else 0
+
+                    gaps.append({
+                        'type': 'duration',
+                        'priority': 'high' if diff_seconds > 1200 else 'medium',  # 20min = crítico
+                        'title': 'Duração dos Vídeos',
+                        'your_value': f'{int(nossa_avg_duration // 60)}min',
+                        'your_context': 'média atual',
+                        'competitor_value': f'{int(concorrente_avg_duration // 60)}min',
+                        'competitor_context': 'top performers',
+                        'difference': diff_percent,
+                        'impact_description': f"+{abs(diff_percent):.0f}% {'mais longo' if concorrente_avg_duration > nossa_avg_duration else 'mais curto'} = potencial +40-60% views",
+                        'actions': [
+                            f"Aumentar duração para {int(concorrente_avg_duration // 60)}-{int(concorrente_avg_duration // 60) + 5}min" if concorrente_avg_duration > nossa_avg_duration else f"Reduzir duração para {int(concorrente_avg_duration // 60)}-{int(concorrente_avg_duration // 60) + 5}min",
+                            "Analisar vídeos top do subniche: quanto tempo duram?",
+                            "Manter qualidade - não encher de conteúdo fraco"
+                        ],
+                        'priority_text': 'ALTA' if diff_seconds > 1200 else 'MÉDIA',
+                        'effort': 'Médio',
+                        'roi': '+40-60% views estimado'
+                    })
+
+        # =====================================================================
+        # GAP 2: FREQUÊNCIA DE UPLOAD
+        # =====================================================================
+        print(f"[Analyzer] Analisando gap de frequência...")
+
+        # Contar vídeos por canal (nossos)
+        response_nossos_canais = self.db.table("videos_historico")\
+            .select("canal_id, canais_monitorados!inner(tipo, subnicho)")\
+            .eq("canais_monitorados.tipo", "nosso")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .execute()
+
+        nossos_canais_videos = response_nossos_canais.data
+
+        # Contar vídeos por canal (concorrentes)
+        response_concorrentes_canais = self.db.table("videos_historico")\
+            .select("canal_id, canais_monitorados!inner(tipo, subnicho)")\
+            .eq("canais_monitorados.tipo", "minerado")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .execute()
+
+        concorrentes_canais_videos = response_concorrentes_canais.data
+
+        if nossos_canais_videos and concorrentes_canais_videos:
+            # Calcular vídeos/canal
+            nossos_canais_unique = set([v['canal_id'] for v in nossos_canais_videos])
+            concorrentes_canais_unique = set([v['canal_id'] for v in concorrentes_canais_videos])
+
+            nossa_freq = len(nossos_canais_videos) / len(nossos_canais_unique) if nossos_canais_unique else 0
+            concorrente_freq = len(concorrentes_canais_videos) / len(concorrentes_canais_unique) if concorrentes_canais_unique else 0
+
+            # Diferença significativa (> 2 vídeos/mês)
+            diff_videos = abs(nossa_freq - concorrente_freq)
+            if diff_videos > 2:
+                diff_percent = ((concorrente_freq / nossa_freq - 1) * 100) if nossa_freq > 0 else 0
+
                 gaps.append({
-                    'gap_title': f"Padrão não utilizado: {pattern_key}",
-                    'gap_description': f"Concorrentes usam e performam bem",
-                    'competitor_count': pattern['video_count'],
-                    'avg_views': pattern['avg_views'],
-                    'example_videos': [pattern['example_title']],
-                    'recommendation': f"Considere produzir vídeos usando a estrutura: {pattern_key}\nExemplo de sucesso: \"{pattern['example_title']}\""
+                    'type': 'frequency',
+                    'priority': 'high' if diff_videos > 4 else 'medium',
+                    'title': 'Frequência de Upload',
+                    'your_value': f'{nossa_freq:.1f} vídeos/mês',
+                    'your_context': 'inconsistente' if nossa_freq < 4 else 'atual',
+                    'competitor_value': f'{concorrente_freq:.1f} vídeos/mês',
+                    'competitor_context': 'consistente',
+                    'difference': diff_percent,
+                    'impact_description': f"+{abs(diff_percent):.0f}% mais conteúdo = algoritmo favorece +80-120% crescimento",
+                    'actions': [
+                        f"Passar de {nossa_freq:.1f} para {concorrente_freq:.1f} vídeos/mês" if concorrente_freq > nossa_freq else f"Reduzir frequência e focar em qualidade",
+                        "Automatizar produção ou contratar editor adicional" if concorrente_freq > nossa_freq else "Analisar quais vídeos performam melhor",
+                        "Manter consistência - postar em dias fixos"
+                    ],
+                    'priority_text': 'ALTA' if diff_videos > 4 else 'MÉDIA',
+                    'effort': 'Alto' if concorrente_freq > nossa_freq else 'Baixo',
+                    'roi': '+80-120% crescimento estimado' if concorrente_freq > nossa_freq else '+20-40% qualidade'
                 })
 
-        print(f"[Analyzer] {len(gaps)} gaps identificados para {subniche}")
-        return gaps[:5]  # Top 5 gaps
+        # =====================================================================
+        # GAP 3: TAXA DE ENGAGEMENT (LIKES/VIEWS)
+        # =====================================================================
+        print(f"[Analyzer] Analisando gap de engagement...")
+
+        # Nossos vídeos com likes
+        response_nossos_eng = self.db.table("videos_historico")\
+            .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+            .eq("canais_monitorados.tipo", "nosso")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .gte("views_atuais", 10000)\
+            .execute()
+
+        nossos_eng = response_nossos_eng.data
+
+        # Concorrentes com likes
+        response_concorrentes_eng = self.db.table("videos_historico")\
+            .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+            .eq("canais_monitorados.tipo", "minerado")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .gte("data_publicacao", cutoff_date)\
+            .gte("views_atuais", 10000)\
+            .execute()
+
+        concorrentes_eng = response_concorrentes_eng.data
+
+        if nossos_eng and concorrentes_eng:
+            # Calcular engagement rate (%)
+            nossa_eng_rate = sum([
+                (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                for v in nossos_eng if v['views_atuais'] > 0
+            ]) / len(nossos_eng)
+
+            concorrente_eng_rate = sum([
+                (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                for v in concorrentes_eng if v['views_atuais'] > 0
+            ]) / len(concorrentes_eng)
+
+            # Diferença significativa (> 0.5%)
+            diff_eng = abs(nossa_eng_rate - concorrente_eng_rate)
+            if diff_eng > 0.5:
+                diff_percent = ((concorrente_eng_rate / nossa_eng_rate - 1) * 100) if nossa_eng_rate > 0 else 0
+
+                gaps.append({
+                    'type': 'engagement',
+                    'priority': 'high' if diff_eng > 1.0 else 'medium',
+                    'title': 'Taxa de Engagement (Likes/Views)',
+                    'your_value': f'{nossa_eng_rate:.2f}%',
+                    'your_context': f'{int(nossa_eng_rate * 400)} likes/40k views',
+                    'competitor_value': f'{concorrente_eng_rate:.2f}%',
+                    'competitor_context': f'{int(concorrente_eng_rate * 400)} likes/40k views',
+                    'difference': diff_percent,
+                    'impact_description': f"+{abs(diff_percent):.0f}% engagement = algoritmo favorece +30-50% alcance",
+                    'actions': [
+                        "Adicionar CTAs fortes nos momentos emocionais altos",
+                        "Pedir likes no início (1-2min) E final do vídeo",
+                        "Responder primeiros 10 comentários em 1h (engajamento)",
+                        "Analisar thumbnails dos top 5 - criar mais expectativa"
+                    ],
+                    'priority_text': 'ALTA' if diff_eng > 1.0 else 'MÉDIA',
+                    'effort': 'Baixo',
+                    'roi': '+30-50% alcance estimado'
+                })
+
+        # Ordenar por prioridade e retornar no máximo 2 gaps
+        gaps.sort(key=lambda x: {'high': 0, 'medium': 1}.get(x['priority'], 2))
+
+        print(f"[Analyzer] {len(gaps[:2])} gaps estratégicos identificados para {subniche}")
+        return gaps[:2]  # MÁXIMO 2 GAPS MAIS IMPORTANTES
 
 
 # =========================================================================

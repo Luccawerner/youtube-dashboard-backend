@@ -415,10 +415,10 @@ class ReportGenerator:
 
         # Buscar subniches
         response_subniches = self.db.table("canais_monitorados")\
-            .select("DISTINCT subnicho")\
+            .select("subnicho")\
             .execute()
 
-        subniches = [item['subnicho'] for item in response_subniches.data]
+        subniches = list(set([item['subnicho'] for item in response_subniches.data]))
 
         frequency_analysis = {}
 
@@ -470,10 +470,10 @@ class ReportGenerator:
 
         # Buscar subniches
         response_subniches = self.db.table("canais_monitorados")\
-            .select("DISTINCT subnicho")\
+            .select("subnicho")\
             .execute()
 
-        subniches = [item['subnicho'] for item in response_subniches.data]
+        subniches = list(set([item['subnicho'] for item in response_subniches.data]))
 
         engagement_analysis = {}
 
@@ -534,10 +534,10 @@ class ReportGenerator:
 
         # Buscar subniches
         response_subniches = self.db.table("canais_monitorados")\
-            .select("DISTINCT subnicho")\
+            .select("subnicho")\
             .execute()
 
-        subniches = [item['subnicho'] for item in response_subniches.data]
+        subniches = list(set([item['subnicho'] for item in response_subniches.data]))
 
         duration_analysis = {}
 

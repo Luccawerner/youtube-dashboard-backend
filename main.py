@@ -996,15 +996,25 @@ async def get_title_patterns_analysis(subniche: str, days: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analysis/top-channels")
-async def get_top_channels_analysis(subniche: str):
-    """Retorna top 5 canais por subniche - TEMPO REAL"""
+async def get_top_channels_analysis(subniche: str, days: int = 30):
+    """Retorna top 5 canais por subniche - TEMPO REAL (com filtro de período)"""
     try:
+        if days not in [7, 15, 30]:
+            raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
+
         # Chamar analyzer em TEMPO REAL
         from analyzer import Analyzer
         analyzer = Analyzer(db.supabase)
-        channels = analyzer.analyze_top_channels(subniche=subniche)
+        channels = analyzer.analyze_top_channels(subniche=subniche, period_days=days)
 
-        return {"subniche": subniche, "total": len(channels), "channels": channels}
+        return {
+            "subniche": subniche,
+            "period_days": days,
+            "total": len(channels),
+            "channels": channels
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting top channels: {e}")
         raise HTTPException(status_code=500, detail=str(e))

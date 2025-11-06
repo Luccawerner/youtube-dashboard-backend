@@ -516,20 +516,21 @@ class Analyzer:
     # ANÁLISE DE TOP CHANNELS
     # =========================================================================
 
-    def analyze_top_channels(self, subniche: str) -> List[Dict]:
+    def analyze_top_channels(self, subniche: str, period_days: int = 30) -> List[Dict]:
         """
-        Identifica top 5 canais por subniche (últimos 30 dias)
+        Identifica top 5 canais por subniche
 
         Args:
             subniche: Subniche a analisar
+            period_days: Período em dias (7, 15 ou 30)
 
         Returns:
-            Lista com top 5 canais ordenados por views_30d
+            Lista com top 5 canais ordenados por views do período
         """
-        print(f"[Analyzer] Analisando top channels ({subniche})...")
+        print(f"[Analyzer] Analisando top channels ({subniche}, {period_days} dias)...")
 
         # Buscar canais minerados do subniche
-        cutoff_date = datetime.now() - timedelta(days=30)
+        cutoff_date = datetime.now() - timedelta(days=period_days)
 
         response = self.db.table("dados_canais_historico")\
             .select("*, canais_monitorados!inner(id, nome_canal, url_canal, subnicho, tipo)")\
@@ -545,6 +546,10 @@ class Analyzer:
             print(f"[Analyzer] Nenhum canal encontrado para {subniche}")
             return []
 
+        # Mapear período para campo de views correto
+        views_field_map = {7: 'views_7d', 15: 'views_15d', 30: 'views_30d'}
+        views_field = views_field_map.get(period_days, 'views_30d')
+
         # Agrupar por canal e pegar dados mais recentes
         channels_by_id = {}
         for row in channels_data:
@@ -555,7 +560,8 @@ class Analyzer:
                     'canal_id': canal_id,
                     'nome_canal': row['canais_monitorados']['nome_canal'],
                     'url_canal': row['canais_monitorados']['url_canal'],
-                    'views_30d': row['views_30d'],
+                    'views_period': row.get(views_field, row.get('views_30d', 0)),
+                    'views_30d': row.get('views_30d', 0),  # Manter para compatibilidade
                     'inscritos': row['inscritos'],
                     'data_coleta': row['data_coleta']
                 }
@@ -599,12 +605,12 @@ class Analyzer:
             else:
                 data['growth_percentage'] = 0.0
 
-        # Ordenar por views_30d e pegar top 5
+        # Ordenar por views do período e pegar top 5
         channel_list = list(channels_by_id.values())
-        channel_list.sort(key=lambda x: x['views_30d'], reverse=True)
+        channel_list.sort(key=lambda x: x['views_period'], reverse=True)
         top_5 = channel_list[:5]
 
-        print(f"[Analyzer] {len(top_5)} canais identificados para {subniche}")
+        print(f"[Analyzer] {len(top_5)} canais identificados para {subniche} ({period_days} dias)")
         return top_5
 
     # =========================================================================

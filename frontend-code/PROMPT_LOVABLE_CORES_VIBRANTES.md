@@ -1,10 +1,10 @@
-# 🎨 ATUALIZAÇÃO: Cores Vibrantes para 11 Subniches
+# 🎨 ATUALIZAÇÃO: Cores Equilibradas para 11 Subniches
 
 ## 📋 CONTEXTO
 
-Atualização do sistema de cores do dashboard para **paleta vibrante moderna** estilo Stripe/Linear.
+Atualização do sistema de cores do dashboard para **paleta moderna profissional** estilo Médio/Equilibrado.
 
-**OBJETIVO:** Substituir cores atuais (apagadas) por cores vibrantes (saturação 70-85%) com gradientes temáticos.
+**OBJETIVO:** Substituir cores atuais por cores equilibradas (saturação 50-60%) - vibrantes mas não cansativas.
 
 ---
 
@@ -16,31 +16,31 @@ Atualização do sistema de cores do dashboard para **paleta vibrante moderna** 
 - Visual sem personalidade
 
 ### DEPOIS:
-- ✨ 11 cores vibrantes e únicas
+- ✨ 11 cores equilibradas e únicas
 - 🎯 Cada subniche IMEDIATAMENTE reconhecível
-- 💼 Profissional estilo Stripe/Linear
-- 🔥 Gradientes temáticos (cores refletem o conteúdo)
-- 🧹 Clean e moderno
+- 💼 Profissional estilo Médio/Equilibrado
+- 🔥 Cores temáticas (refletem o conteúdo)
+- 🧹 Clean, moderno e não cansa os olhos
 
 ---
 
-## 🎨 PALETA COMPLETA - 11 CORES VIBRANTES
+## 🎨 PALETA COMPLETA - 11 CORES EQUILIBRADAS
 
-### Cores Temáticas (Saturação 70-85%)
+### Cores Temáticas (Saturação 50-60%)
 
 | Subniche | Tema | Fundo | Borda | Vibe |
 |----------|------|-------|-------|------|
-| **Contos Familiares** | Calor familiar | `#FF8C42` | `#E86339` | Aconchego |
-| **Terror** | Medo, sangue | `#EF4444` | `#B91C1C` | Intenso |
-| **Histórias Sombrias** | Mistério profundo | `#8B5CF6` | `#6D28D9` | Sombrio |
-| **Histórias Aleatórias** | Variedade | `#EC4899` | `#BE185D` | Dinâmico |
-| **Relatos de Guerra** | Militar | `#10B981` | `#047857` | Histórico |
-| **Stickman** | Educação | `#3B82F6` | `#1D4ED8` | Clean |
-| **Antiguidade** | Civilizações antigas | `#F59E0B` | `#D97706` | Majestoso |
-| **Histórias Motivacionais** | Crescimento | `#84CC16` | `#65A30D` | Energético |
-| **Mistérios** | Enigma | `#6366F1` | `#4338CA` | Intrigante |
-| **Pessoas Desaparecidas** | Ausência | `#0EA5E9` | `#0369A1` | Profundo |
-| **Psicologia & Mindset** | Mente | `#14B8A6` | `#0D9488` | Transformador |
+| **Contos Familiares** | Calor familiar | `#F97316` | `#EA580C` | Aconchego |
+| **Terror** | Medo, sangue | `#DC2626` | `#991B1B` | Intenso |
+| **Histórias Sombrias** | Mistério profundo | `#7C3AED` | `#5B21B6` | Sombrio |
+| **Histórias Aleatórias** | Variedade | `#DB2777` | `#9F1239` | Dinâmico |
+| **Relatos de Guerra** | Militar | `#059669` | `#047857` | Histórico |
+| **Stickman** | Educação | `#2563EB` | `#1E40AF` | Clean |
+| **Antiguidade** | Civilizações antigas | `#D97706` | `#B45309` | Majestoso |
+| **Histórias Motivacionais** | Crescimento | `#65A30D` | `#4D7C0F` | Energético |
+| **Mistérios** | Enigma | `#4F46E5` | `#3730A3` | Intrigante |
+| **Pessoas Desaparecidas** | Ausência | `#0284C7` | `#075985` | Profundo |
+| **Psicologia & Mindset** | Mente | `#0D9488` | `#0F766E` | Transformador |
 
 ---
 
@@ -63,62 +63,62 @@ Se o arquivo **NÃO EXISTIR**, crie-o com este caminho exato.
 
 ```typescript
 /**
- * Sistema de cores vibrantes para subniches
- * Paleta moderna estilo Stripe/Linear
- * Saturação: 70-85% (cores vivas mas elegantes)
+ * Sistema de cores equilibradas para subniches
+ * Paleta moderna profissional estilo Médio/Equilibrado
+ * Saturação: 50-60% (cores vivas mas não cansativas)
  */
 
 export function obterCorSubnicho(subniche: string): { fundo: string; borda: string } {
   switch (subniche) {
-    // 🏡 Contos Familiares - Laranja coral vibrante
+    // 🏡 Contos Familiares - Laranja médio equilibrado
     case 'Contos Familiares':
-      return { fundo: '#FF8C42', borda: '#E86339' };
+      return { fundo: '#F97316', borda: '#EA580C' };
 
-    // 🔴 Terror - Vermelho sangue intenso
+    // 🔴 Terror - Vermelho médio equilibrado
     case 'Terror':
-      return { fundo: '#EF4444', borda: '#B91C1C' };
+      return { fundo: '#DC2626', borda: '#991B1B' };
 
-    // 🌑 Histórias Sombrias - Roxo profundo misterioso
+    // 🌑 Histórias Sombrias - Roxo médio equilibrado
     case 'Histórias Sombrias':
     case 'Historias Sombrias': // Variação sem acento
-      return { fundo: '#8B5CF6', borda: '#6D28D9' };
+      return { fundo: '#7C3AED', borda: '#5B21B6' };
 
-    // 🎭 Histórias Aleatórias - Rosa neon vibrante
+    // 🎭 Histórias Aleatórias - Rosa médio equilibrado
     case 'Histórias Aleatórias':
     case 'Historias Aleatórias': // Variação sem acento
-      return { fundo: '#EC4899', borda: '#BE185D' };
+      return { fundo: '#DB2777', borda: '#9F1239' };
 
-    // ⚔️ Relatos de Guerra - Verde esmeralda militar
+    // ⚔️ Relatos de Guerra - Verde médio equilibrado
     case 'Relatos de Guerra':
-      return { fundo: '#10B981', borda: '#047857' };
+      return { fundo: '#059669', borda: '#047857' };
 
-    // 🎨 Stickman - Azul vibrante educativo
+    // 🎨 Stickman - Azul médio equilibrado
     case 'Stickman':
-      return { fundo: '#3B82F6', borda: '#1D4ED8' };
+      return { fundo: '#2563EB', borda: '#1E40AF' };
 
-    // 🏛️ Antiguidade - Dourado bronze histórico
+    // 🏛️ Antiguidade - Âmbar médio equilibrado
     case 'Antiguidade':
-      return { fundo: '#F59E0B', borda: '#D97706' };
+      return { fundo: '#D97706', borda: '#B45309' };
 
-    // ⭐ Histórias Motivacionais - Verde lima vibrante
+    // ⭐ Histórias Motivacionais - Verde médio equilibrado
     case 'Histórias Motivacionais':
     case 'Historias Motivacionais': // Variação sem acento
-      return { fundo: '#84CC16', borda: '#65A30D' };
+      return { fundo: '#65A30D', borda: '#4D7C0F' };
 
-    // 🔍 Mistérios - Índigo elétrico investigativo
+    // 🔍 Mistérios - Índigo médio equilibrado
     case 'Mistérios':
     case 'Misterios': // Variação sem acento
-      return { fundo: '#6366F1', borda: '#4338CA' };
+      return { fundo: '#4F46E5', borda: '#3730A3' };
 
-    // 🌫️ Pessoas Desaparecidas - Azul marinho profundo
+    // 🌫️ Pessoas Desaparecidas - Azul médio equilibrado
     case 'Pessoas Desaparecidas':
-      return { fundo: '#0EA5E9', borda: '#0369A1' };
+      return { fundo: '#0284C7', borda: '#075985' };
 
-    // 🧠 Psicologia & Mindset - Teal vibrante cerebral
+    // 🧠 Psicologia & Mindset - Teal médio equilibrado
     case 'Psicologia & Mindset':
     case 'Psicologia':
     case 'Mindset':
-      return { fundo: '#14B8A6', borda: '#0D9488' };
+      return { fundo: '#0D9488', borda: '#0F766E' };
 
     // ⚙️ Cor padrão (fallback para subniches não mapeados)
     default:
@@ -183,17 +183,17 @@ Após aplicar as mudanças:
 
 ### 4. Todos os 11 Subniches
 Verifique se as cores aparecem corretamente para:
-- [ ] Contos Familiares (laranja coral)
-- [ ] Terror (vermelho)
-- [ ] Histórias Sombrias (roxo)
-- [ ] Histórias Aleatórias (rosa)
-- [ ] Relatos de Guerra (verde esmeralda)
-- [ ] Stickman (azul)
-- [ ] Antiguidade (dourado)
-- [ ] Histórias Motivacionais (verde lima)
-- [ ] Mistérios (índigo)
-- [ ] Pessoas Desaparecidas (azul marinho)
-- [ ] Psicologia & Mindset (teal)
+- [ ] Contos Familiares (laranja médio)
+- [ ] Terror (vermelho médio)
+- [ ] Histórias Sombrias (roxo médio)
+- [ ] Histórias Aleatórias (rosa médio)
+- [ ] Relatos de Guerra (verde médio)
+- [ ] Stickman (azul médio)
+- [ ] Antiguidade (âmbar médio)
+- [ ] Histórias Motivacionais (verde médio)
+- [ ] Mistérios (índigo médio)
+- [ ] Pessoas Desaparecidas (azul médio)
+- [ ] Psicologia & Mindset (teal médio)
 
 ### 5. Responsividade
 - [ ] Cores funcionam em mobile (375px)

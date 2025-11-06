@@ -205,17 +205,18 @@ class SupabaseClient:
 
     async def cleanup_stuck_collections(self) -> int:
         try:
-            uma_hora_atras = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-            
+            # Aumentado de 1h para 2h - coletas demoram 60-80min para 263 canais
+            duas_horas_atras = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+
             response = self.supabase.table("coletas_historico").update({
                 "status": "erro",
-                "mensagem_erro": "Coleta travada - marcada como erro automaticamente"
-            }).eq("status", "em_progresso").lt("data_inicio", uma_hora_atras).execute()
-            
+                "mensagem_erro": "Coleta travada - marcada como erro automaticamente (timeout 2h)"
+            }).eq("status", "em_progresso").lt("data_inicio", duas_horas_atras).execute()
+
             count = len(response.data) if response.data else 0
             if count > 0:
-                logger.info(f"Cleaned up {count} stuck collections")
-            
+                logger.info(f"Cleaned up {count} stuck collections (timeout: 2 hours)")
+
             return count
         except Exception as e:
             logger.error(f"Error cleaning up stuck collections: {e}")

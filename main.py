@@ -1141,9 +1141,32 @@ async def run_collection_job():
                     videos_total += len(videos_data)
                 
                 await db.update_last_collection(canal['id'])
-                
+
                 await asyncio.sleep(1)
-                
+
+                # Atualizar progresso no banco a cada 10 canais
+                if index % 10 == 0 and coleta_id:
+                    try:
+                        await db.update_coleta_log(
+                            coleta_id=coleta_id,
+                            status="em_progresso",
+                            canais_sucesso=canais_sucesso,
+                            canais_erro=canais_erro,
+                            videos_coletados=videos_total,
+                            requisicoes_usadas=collector.total_quota_units
+                        )
+                        logger.info(f"📊 Progress update: {canais_sucesso} success, {canais_erro} errors, {videos_total} videos")
+                    except Exception as update_error:
+                        logger.warning(f"⚠️ Failed to update progress: {update_error}")
+
+                # Log de progresso a cada 25 canais
+                if index % 25 == 0:
+                    logger.info("=" * 80)
+                    logger.info(f"🔄 PROGRESS CHECKPOINT [{index}/{total_canais}]")
+                    logger.info(f"✅ Success: {canais_sucesso} | ❌ Errors: {canais_erro} | 🎬 Videos: {videos_total}")
+                    logger.info(f"📡 API Requests: {collector.total_quota_units} | ⏱️  Time elapsed: ongoing")
+                    logger.info("=" * 80)
+
             except Exception as e:
                 logger.error(f"❌ Error processing {canal['nome_canal']}: {e}")
                 canais_erro += 1

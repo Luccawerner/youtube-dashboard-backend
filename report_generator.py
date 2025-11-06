@@ -572,37 +572,70 @@ class ReportGenerator:
     # AÇÕES RECOMENDADAS
     # =========================================================================
 
-    def _generate_recommendations(self) -> List[Dict]:
+    def _generate_recommendations(self) -> Dict[str, Dict]:
         """
-        Gera lista de ações recomendadas ESTRATÉGICAS com 4 tipos de insights:
-        1. NOSSOS CANAIS - PROBLEMAS (urgente)
-        2. CONCORRENTES - COPIAR (alta prioridade)
-        3. NOSSOS CANAIS - CONTINUAR (média prioridade)
-        4. NOSSOS CANAIS - MELHORAR (média prioridade)
+        Gera ações recomendadas AGRUPADAS POR SUBNICHE
+
+        🆕 NOVA ESTRUTURA: 1 card por subniche com todas as recomendações
+
+        Garante que TODOS os subniches nossos aparecem (mesmo que seja só "continuar assim")
 
         Returns:
-            Lista de recomendações priorizadas com category, impact, effort, avg_views
+            Dict com subniches como keys e recomendações agrupadas como values
+            {
+                'Contos Familiares': {
+                    'status': 'growing',
+                    'growth_percentage': 15.0,
+                    'recommendations': [...]
+                },
+                ...
+            }
         """
-        print("[ReportGenerator] Gerando recomendações estratégicas...")
+        print("[ReportGenerator] Gerando recomendações agrupadas por subniche...")
 
-        recommendations = []
+        # Estrutura: dict de subniches com suas recomendações
+        recommendations_by_subniche = {}
 
         # Buscar dados de performance
         performance_data = self._get_performance_by_subniche(
             (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         )
 
+        # Inicializar dict com TODOS os subniches "nosso" e determinar status
+        for perf in performance_data:
+            subniche = perf['subniche']
+            growth = perf['growth_percentage']
+
+            # Determinar status
+            if growth > 10:
+                status = 'growing'
+            elif growth < -10:
+                status = 'declining'
+            else:
+                status = 'stable'
+
+            recommendations_by_subniche[subniche] = {
+                'status': status,
+                'growth_percentage': growth,
+                'recommendations': []
+            }
+
+        # Helper function para adicionar recomendação a um subniche
+        def add_recommendation(subniche, recommendation):
+            if subniche in recommendations_by_subniche:
+                recommendations_by_subniche[subniche]['recommendations'].append(recommendation)
+
         # =====================================================================
         # 1. NOSSOS CANAIS - PROBLEMAS URGENTES (Subnichos em queda acentuada)
         # =====================================================================
         for perf in performance_data:
             if perf['growth_percentage'] < -10:  # Queda >10%
-                recommendations.append({
+                add_recommendation(perf['subniche'], {
                     'priority': 'urgent',
                     'category': 'NOSSOS CANAIS - PROBLEMA',
-                    'title': f"🔴 {perf['subniche']} em queda acentuada",
+                    'title': f"🔴 Queda acentuada de performance",
                     'description': f"Queda de {abs(perf['growth_percentage']):.1f}% nas views. Necessário ação imediata para reverter tendência negativa.",
-                    'action': f"1) Revisar últimos 5 vídeos: thumbnails, títulos, hooks iniciais\n2) Comparar com concorrentes top do subniche {perf['subniche']}\n3) Testar novo formato de vídeo ou padrão de título\n4) Analisar retenção de audiência (primeiros 30s)",
+                    'action': f"1) Revisar últimos 5 vídeos: thumbnails, títulos, hooks iniciais\n2) Comparar com concorrentes top deste subniche\n3) Testar novo formato de vídeo ou padrão de título\n4) Analisar retenção de audiência (primeiros 30s)",
                     'impact': 'CRÍTICO',
                     'effort': 'Alto'
                 })
@@ -611,7 +644,7 @@ class ReportGenerator:
         # 2. NOSSOS CANAIS - O QUE FAZEMOS BEM E DEVEMOS CONTINUAR
         # =====================================================================
         # Identifica top performers (subniches com crescimento >15%)
-        top_performers = sorted(performance_data, key=lambda x: x['growth_percentage'], reverse=True)[:2]
+        top_performers = sorted(performance_data, key=lambda x: x['growth_percentage'], reverse=True)[:3]
 
         for perf in top_performers:
             if perf['growth_percentage'] > 15:
@@ -632,10 +665,10 @@ class ReportGenerator:
                     top_video = top_videos_response.data[0]
                     avg_views = sum(v['views_atuais'] for v in top_videos_response.data) / len(top_videos_response.data)
 
-                    recommendations.append({
+                    add_recommendation(perf['subniche'], {
                         'priority': 'medium',
                         'category': 'NOSSOS CANAIS - CONTINUAR',
-                        'title': f"✅ {perf['subniche']} performando excelente (+{perf['growth_percentage']:.1f}%)",
+                        'title': f"✅ Performance excelente (+{perf['growth_percentage']:.1f}%)",
                         'description': f"Crescimento de {perf['growth_percentage']:.1f}% nas views. {len(top_videos_response.data)} vídeos com 50k+ views nos últimos 30 dias!",
                         'action': f"MANTER estratégia atual:\n• Continuar modelo que funciona (avg {avg_views:,.0f} views)\n• Top vídeo: \"{top_video['titulo']}\" ({top_video['views_atuais']:,} views)\n• Analisar esses {len(top_videos_response.data)} vídeos: o que têm em comum?\n• Replicar formato em outros subniches se possível",
                         'impact': 'MÉDIO',
@@ -646,18 +679,18 @@ class ReportGenerator:
         # =====================================================================
         # 3. NOSSOS CANAIS - O QUE FAZEMOS MAL E DEVEMOS MELHORAR
         # =====================================================================
-        # Identifica underperformers (abaixo da média)
+        # Identifica underperformers (abaixo da média, mas não em queda crítica)
         if performance_data:
             avg_growth = sum(p['growth_percentage'] for p in performance_data) / len(performance_data)
-            underperformers = [p for p in performance_data if p['growth_percentage'] < avg_growth * 0.5][:2]
+            underperformers = [p for p in performance_data if p['growth_percentage'] < avg_growth * 0.5 and p['growth_percentage'] >= -10][:3]
 
             for perf in underperformers:
-                recommendations.append({
+                add_recommendation(perf['subniche'], {
                     'priority': 'medium',
                     'category': 'NOSSOS CANAIS - MELHORAR',
-                    'title': f"⚠️ {perf['subniche']} abaixo da média",
+                    'title': f"⚠️ Performance abaixo da média",
                     'description': f"Crescimento de apenas {perf['growth_percentage']:.1f}% vs média geral de {avg_growth:.1f}%. Há espaço para otimização.",
-                    'action': f"1) Analisar top 3 vídeos dos concorrentes de {perf['subniche']}\n2) Testar novos formatos de thumbnail (A/B test)\n3) Revisar SEO: título, descrição, tags\n4) Avaliar horário de postagem e frequência",
+                    'action': f"1) Analisar top 3 vídeos dos concorrentes deste subniche\n2) Testar novos formatos de thumbnail (A/B test)\n3) Revisar SEO: título, descrição, tags\n4) Avaliar horário de postagem e frequência",
                     'impact': 'MÉDIO',
                     'effort': 'Médio'
                 })
@@ -667,22 +700,22 @@ class ReportGenerator:
         # =====================================================================
         frequency_data = self._analyze_upload_frequency()
 
-        for subniche, data in list(frequency_data.items())[:2]:
+        for subniche, data in frequency_data.items():
             if data['difference'] > 3:  # Concorrentes postam 3+ vídeos a mais por canal
-                recommendations.append({
+                add_recommendation(subniche, {
                     'priority': 'high',
                     'category': 'FREQUÊNCIA - AJUSTAR',
-                    'title': f"📅 Frequência de upload baixa em {subniche}",
+                    'title': f"📅 Frequência de upload baixa",
                     'description': f"Concorrentes postam {data['concorrentes_videos_per_canal']:.1f} vídeos/canal vs nossos {data['nossos_videos_per_canal']:.1f} (últimos 30 dias). Diferença de {data['difference']:.1f} vídeos/canal.",
-                    'action': f"1) Aumentar produção de {subniche} para igualar concorrentes\n2) Se não conseguir produzir mais, priorizar qualidade sobre quantidade\n3) Considerar contratar editor adicional ou otimizar fluxo de produção\n4) Avaliar se falta de consistência afeta algoritmo do YouTube",
+                    'action': f"1) Aumentar produção para igualar concorrentes\n2) Se não conseguir produzir mais, priorizar qualidade sobre quantidade\n3) Considerar contratar editor adicional ou otimizar fluxo de produção\n4) Avaliar se falta de consistência afeta algoritmo do YouTube",
                     'impact': 'ALTO',
                     'effort': 'Alto'
                 })
             elif data['difference'] < -3:  # Estamos postando muito mais
-                recommendations.append({
+                add_recommendation(subniche, {
                     'priority': 'medium',
                     'category': 'FREQUÊNCIA - OTIMIZAR',
-                    'title': f"📹 Excesso de uploads em {subniche}",
+                    'title': f"📹 Excesso de uploads",
                     'description': f"Estamos postando {data['nossos_videos_per_canal']:.1f} vídeos/canal vs {data['concorrentes_videos_per_canal']:.1f} dos concorrentes (últimos 30 dias).",
                     'action': f"Avaliar se o excesso de uploads está afetando qualidade ou engagement. Considerar reduzir frequência e focar em vídeos com maior potencial de views.",
                     'impact': 'MÉDIO',
@@ -694,14 +727,14 @@ class ReportGenerator:
         # =====================================================================
         engagement_data = self._analyze_engagement()
 
-        for subniche, data in list(engagement_data.items())[:2]:
+        for subniche, data in engagement_data.items():
             if data['difference'] > 0.5:  # Concorrentes têm 0.5%+ engagement a mais
-                recommendations.append({
+                add_recommendation(subniche, {
                     'priority': 'high',
                     'category': 'ENGAGEMENT - MELHORAR',
-                    'title': f"👍 Baixo engagement em {subniche}",
+                    'title': f"👍 Baixo engagement",
                     'description': f"Taxa de likes nossos: {data['nossos_engagement_rate']:.2f}% vs concorrentes: {data['concorrentes_engagement_rate']:.2f}%. Diferença de {data['difference']:.2f}%.",
-                    'action': f"1) Adicionar CTAs (Call To Action) mais fortes nos vídeos de {subniche}\n2) Pedir likes/comments de forma natural no início E fim do vídeo\n3) Criar momentos mais \"meme-áveis\" ou emocionais que incentivem reação\n4) Responder mais comentários para estimular comunidade\n5) Analisar thumbnails - podem não estar gerando expectativa suficiente",
+                    'action': f"1) Adicionar CTAs (Call To Action) mais fortes nos vídeos\n2) Pedir likes/comments de forma natural no início E fim do vídeo\n3) Criar momentos mais \"meme-áveis\" ou emocionais que incentivem reação\n4) Responder mais comentários para estimular comunidade\n5) Analisar thumbnails - podem não estar gerando expectativa suficiente",
                     'impact': 'ALTO',
                     'effort': 'Médio'
                 })
@@ -711,24 +744,55 @@ class ReportGenerator:
         # =====================================================================
         duration_data = self._analyze_video_duration()
 
-        for subniche, data in list(duration_data.items())[:2]:
+        for subniche, data in duration_data.items():
             if data['avg_duration_minutes'] > 0:
-                recommendations.append({
+                add_recommendation(subniche, {
                     'priority': 'medium',
                     'category': 'DURAÇÃO - INSIGHT',
-                    'title': f"⏱️ Duração ideal para {subniche}",
-                    'description': f"Vídeos de sucesso (50k+ views) em {subniche} têm média de {data['avg_duration_minutes']:.1f} minutos ({data['video_count']} vídeos analisados).",
-                    'action': f"Usar {data['avg_duration_minutes']:.1f} minutos como referência para novos vídeos de {subniche}. Vídeos muito mais curtos ou longos podem performar pior.",
+                    'title': f"⏱️ Duração ideal identificada",
+                    'description': f"Vídeos de sucesso (50k+ views) têm média de {data['avg_duration_minutes']:.1f} minutos ({data['video_count']} vídeos analisados).",
+                    'action': f"Usar {data['avg_duration_minutes']:.1f} minutos como referência para novos vídeos. Vídeos muito mais curtos ou longos podem performar pior.",
                     'impact': 'MÉDIO',
                     'effort': 'Baixo'
                 })
 
-        # Ordenar por prioridade
-        priority_order = {'urgent': 0, 'high': 1, 'medium': 2}
-        recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
+        # =====================================================================
+        # 7. GARANTIR QUE TODOS OS SUBNICHES TÊM PELO MENOS 1 RECOMENDAÇÃO
+        # =====================================================================
+        for subniche, data in recommendations_by_subniche.items():
+            if len(data['recommendations']) == 0:
+                # Adicionar recomendação padrão baseada no status
+                if data['status'] == 'stable':
+                    add_recommendation(subniche, {
+                        'priority': 'low',
+                        'category': 'NOSSOS CANAIS - MANTER',
+                        'title': f"✅ Performance estável",
+                        'description': f"Crescimento de {data['growth_percentage']:.1f}% nas views. Performance dentro do esperado.",
+                        'action': f"Continuar estratégia atual. Monitorar concorrentes e testar pequenas otimizações quando possível (thumbnails, títulos, SEO).",
+                        'impact': 'BAIXO',
+                        'effort': 'Baixo'
+                    })
+                elif data['status'] == 'growing':
+                    add_recommendation(subniche, {
+                        'priority': 'low',
+                        'category': 'NOSSOS CANAIS - MANTER',
+                        'title': f"✅ Crescimento positivo",
+                        'description': f"Crescimento de {data['growth_percentage']:.1f}% nas views. Subniche em boa trajetória.",
+                        'action': f"Manter estratégia atual e identificar padrões de sucesso para replicar em outros subniches.",
+                        'impact': 'BAIXO',
+                        'effort': 'Baixo'
+                    })
 
-        print(f"[ReportGenerator] {len(recommendations)} recomendações estratégicas geradas")
-        return recommendations[:12]  # Top 12 recomendações mais importantes
+        # Ordenar recomendações dentro de cada subniche por prioridade
+        priority_order = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3}
+        for subniche in recommendations_by_subniche:
+            recommendations_by_subniche[subniche]['recommendations'].sort(
+                key=lambda x: priority_order.get(x['priority'], 4)
+            )
+
+        total_recommendations = sum(len(data['recommendations']) for data in recommendations_by_subniche.values())
+        print(f"[ReportGenerator] {total_recommendations} recomendações agrupadas em {len(recommendations_by_subniche)} subniches")
+        return recommendations_by_subniche
 
     # =========================================================================
     # SALVAR RELATÓRIO

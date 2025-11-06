@@ -37,9 +37,9 @@ Atualização do sistema de cores do dashboard para **paleta vibrante moderna** 
 | **Relatos de Guerra** | Militar | `#10B981` | `#047857` | Histórico |
 | **Stickman** | Educação | `#3B82F6` | `#1D4ED8` | Clean |
 | **Antiguidade** | Civilizações antigas | `#F59E0B` | `#D97706` | Majestoso |
-| **Histórias Motivacionais** | Inspiração | `#FBBF24` | `#F59E0B` | Positivo |
+| **Histórias Motivacionais** | Inspiração | `#F472B6` | `#DB2777` | Energético |
 | **Mistérios** | Enigma | `#6366F1` | `#4338CA` | Intrigante |
-| **Pessoas Desaparecidas** | Ausência | `#64748B` | `#475569` | Melancólico |
+| **Pessoas Desaparecidas** | Ausência | `#0EA5E9` | `#0369A1` | Profundo |
 | **Psicologia & Mindset** | Mente | `#14B8A6` | `#0D9488` | Transformador |
 
 ---
@@ -100,19 +100,19 @@ export function obterCorSubnicho(subniche: string): { fundo: string; borda: stri
     case 'Antiguidade':
       return { fundo: '#F59E0B', borda: '#D97706' };
 
-    // ⭐ Histórias Motivacionais - Amarelo sol radiante
+    // ⭐ Histórias Motivacionais - Coral rosado vibrante
     case 'Histórias Motivacionais':
     case 'Historias Motivacionais': // Variação sem acento
-      return { fundo: '#FBBF24', borda: '#F59E0B' };
+      return { fundo: '#F472B6', borda: '#DB2777' };
 
     // 🔍 Mistérios - Índigo elétrico investigativo
     case 'Mistérios':
     case 'Misterios': // Variação sem acento
       return { fundo: '#6366F1', borda: '#4338CA' };
 
-    // 🌫️ Pessoas Desaparecidas - Cinza azulado sombrio
+    // 🌫️ Pessoas Desaparecidas - Azul marinho profundo
     case 'Pessoas Desaparecidas':
-      return { fundo: '#64748B', borda: '#475569' };
+      return { fundo: '#0EA5E9', borda: '#0369A1' };
 
     // 🧠 Psicologia & Mindset - Teal vibrante cerebral
     case 'Psicologia & Mindset':
@@ -190,9 +190,9 @@ Verifique se as cores aparecem corretamente para:
 - [ ] Relatos de Guerra (verde)
 - [ ] Stickman (azul)
 - [ ] Antiguidade (dourado)
-- [ ] Histórias Motivacionais (amarelo)
+- [ ] Histórias Motivacionais (coral rosado)
 - [ ] Mistérios (índigo)
-- [ ] Pessoas Desaparecidas (cinza azulado)
+- [ ] Pessoas Desaparecidas (azul marinho)
 - [ ] Psicologia & Mindset (teal)
 
 ### 5. Responsividade

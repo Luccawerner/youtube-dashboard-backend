@@ -609,7 +609,8 @@ async def get_coletas_historico(limit: Optional[int] = 20):
         next_reset_brasilia = next_reset + brasilia_offset
 
         chaves_esgotadas_real = min(int(quota_usada // 10000), len(collector.api_keys))
-        chaves_ativas_real = len(collector.api_keys) - chaves_esgotadas_real
+        chaves_suspensas_real = len(collector.suspended_keys)
+        chaves_ativas_real = len(collector.api_keys) - chaves_esgotadas_real - chaves_suspensas_real
         
         return {
             "historico": historico,
@@ -623,6 +624,8 @@ async def get_coletas_historico(limit: Optional[int] = 20):
                 "chaves_ativas": chaves_ativas_real,
                 "chaves_esgotadas": chaves_esgotadas_real,
                 "chaves_esgotadas_ids": list(collector.exhausted_keys_date.keys()),
+                "chaves_suspensas": len(collector.suspended_keys),
+                "chaves_suspensas_ids": list(collector.suspended_keys),
                 "proximo_reset_utc": next_reset.isoformat(),
                 "proximo_reset_local": next_reset_brasilia.strftime("%d/%m/%Y %H:%M (Horário de Brasília)")
             }

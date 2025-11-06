@@ -135,7 +135,7 @@ class ReportGenerator:
                 'canal_nome': video['canais_monitorados']['nome_canal'],
                 'canal_id': canal_id,
                 'views_atuais': video['views_atuais'],
-                'likes_atuais': video.get('likes_atuais', 0),
+                'likes': video.get('likes', 0),
                 'duracao': video.get('duracao', 0),
                 'views_7d': video['views_atuais'],
                 'subscribers_gained_7d': subs_gained,
@@ -480,7 +480,7 @@ class ReportGenerator:
         for subniche in subniches:
             # Nossos canais
             response_nossos = self.db.table("videos_historico")\
-                .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+                .select("views_atuais, likes, canais_monitorados!inner(tipo, subnicho)")\
                 .eq("canais_monitorados.tipo", "nosso")\
                 .eq("canais_monitorados.subnicho", subniche)\
                 .gte("data_publicacao", cutoff_date)\
@@ -491,7 +491,7 @@ class ReportGenerator:
 
             # Concorrentes
             response_concorrentes = self.db.table("videos_historico")\
-                .select("views_atuais, likes_atuais, canais_monitorados!inner(tipo, subnicho)")\
+                .select("views_atuais, likes, canais_monitorados!inner(tipo, subnicho)")\
                 .eq("canais_monitorados.tipo", "minerado")\
                 .eq("canais_monitorados.subnicho", subniche)\
                 .gte("data_publicacao", cutoff_date)\
@@ -503,12 +503,12 @@ class ReportGenerator:
             if nossos_videos and concorrentes_videos:
                 # Calcular taxa de engagement
                 nossos_engagement = sum([
-                    (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                    (v.get('likes', 0) / v['views_atuais'] * 100)
                     for v in nossos_videos if v['views_atuais'] > 0
                 ]) / len(nossos_videos)
 
                 concorrentes_engagement = sum([
-                    (v.get('likes_atuais', 0) / v['views_atuais'] * 100)
+                    (v.get('likes', 0) / v['views_atuais'] * 100)
                     for v in concorrentes_videos if v['views_atuais'] > 0
                 ]) / len(concorrentes_videos)
 

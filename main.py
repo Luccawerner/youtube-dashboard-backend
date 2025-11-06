@@ -949,15 +949,29 @@ async def toggle_regra_notificacao(regra_id: int):
 
 @app.get("/api/analysis/keywords")
 async def get_keywords_analysis(subniche: str = None, days: int = 30):
-    """Retorna top 10 keywords - TEMPO REAL (com ou sem subniche)"""
+    """
+    Retorna top 10 keywords
+
+    🚀 OTIMIZADO: Usa tabela pré-calculada (atualizada diariamente)
+    Fallback para tempo real se tabela vazia
+    """
     try:
         if days not in [7, 15, 30]:
             raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
 
-        # Chamar analyzer em TEMPO REAL (não usa tabela)
-        from analyzer import Analyzer
-        analyzer = Analyzer(db.supabase)
-        keywords = analyzer.analyze_keywords(subniche=subniche, period_days=days)
+        # 1. Tentar buscar da tabela pré-calculada (RÁPIDO - ~50ms)
+        keywords = await db.get_keyword_analysis(period_days=days)
+
+        # 2. Filtrar por subniche se especificado
+        if subniche and keywords:
+            keywords = [k for k in keywords if k.get('subniche') == subniche]
+
+        # 3. Fallback: Se tabela vazia, calcular em tempo real
+        if not keywords:
+            logger.warning(f"Tabela keyword_analysis vazia - calculando em tempo real")
+            from analyzer import Analyzer
+            analyzer = Analyzer(db.supabase)
+            keywords = analyzer.analyze_keywords(subniche=subniche, period_days=days)
 
         return {
             "subniche": subniche or "todos",
@@ -973,15 +987,25 @@ async def get_keywords_analysis(subniche: str = None, days: int = 30):
 
 @app.get("/api/analysis/title-patterns")
 async def get_title_patterns_analysis(subniche: str, days: int = 30):
-    """Retorna top 5 padrões de título - TEMPO REAL"""
+    """
+    Retorna top 5 padrões de título
+
+    🚀 OTIMIZADO: Usa tabela pré-calculada (atualizada diariamente)
+    Fallback para tempo real se tabela vazia
+    """
     try:
         if days not in [7, 15, 30]:
             raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
 
-        # Chamar analyzer em TEMPO REAL
-        from analyzer import Analyzer
-        analyzer = Analyzer(db.supabase)
-        patterns = analyzer.analyze_title_patterns(subniche=subniche, period_days=days)
+        # 1. Tentar buscar da tabela pré-calculada (RÁPIDO - ~50ms)
+        patterns = await db.get_title_patterns(subniche=subniche, period_days=days)
+
+        # 2. Fallback: Se tabela vazia, calcular em tempo real
+        if not patterns:
+            logger.warning(f"Tabela title_patterns vazia para {subniche} - calculando em tempo real")
+            from analyzer import Analyzer
+            analyzer = Analyzer(db.supabase)
+            patterns = analyzer.analyze_title_patterns(subniche=subniche, period_days=days)
 
         return {
             "subniche": subniche,
@@ -997,15 +1021,29 @@ async def get_title_patterns_analysis(subniche: str, days: int = 30):
 
 @app.get("/api/analysis/top-channels")
 async def get_top_channels_analysis(subniche: str, days: int = 30):
-    """Retorna top 5 canais por subniche - TEMPO REAL (com filtro de período)"""
+    """
+    Retorna top 5 canais por subniche
+
+    🚀 OTIMIZADO: Usa tabela pré-calculada quando disponível
+    Fallback para tempo real com filtro de período
+    """
     try:
         if days not in [7, 15, 30]:
             raise HTTPException(status_code=400, detail="days deve ser 7, 15 ou 30")
 
-        # Chamar analyzer em TEMPO REAL
-        from analyzer import Analyzer
-        analyzer = Analyzer(db.supabase)
-        channels = analyzer.analyze_top_channels(subniche=subniche, period_days=days)
+        channels = []
+
+        # 1. Para período de 30 dias, tentar usar snapshot (RÁPIDO - ~50ms)
+        if days == 30:
+            channels = await db.get_top_channels_snapshot(subniche=subniche)
+
+        # 2. Fallback: Se snapshot vazio OU período diferente de 30 dias, calcular em tempo real
+        if not channels:
+            if days == 30:
+                logger.warning(f"Snapshot vazio para {subniche} - calculando em tempo real")
+            from analyzer import Analyzer
+            analyzer = Analyzer(db.supabase)
+            channels = analyzer.analyze_top_channels(subniche=subniche, period_days=days)
 
         return {
             "subniche": subniche,

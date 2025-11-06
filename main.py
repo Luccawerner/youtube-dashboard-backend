@@ -591,20 +591,6 @@ async def reset_suspended_keys():
         logger.error(f"Error resetting suspended keys: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/reset-suspended-keys")
-async def reset_suspended_keys():
-    """Endpoint para resetar chaves suspensas (testar novamente apos contestacao)"""
-    try:
-        count = collector.reset_suspended_keys()
-        return {
-            "message": f"{count} chave(s) suspensa(s) resetada(s) com sucesso",
-            "keys_reset": count,
-            "status": "success"
-        }
-    except Exception as e:
-        logger.error(f"Error resetting suspended keys: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/api/coletas/historico")
 async def get_coletas_historico(limit: Optional[int] = 20):
     try:

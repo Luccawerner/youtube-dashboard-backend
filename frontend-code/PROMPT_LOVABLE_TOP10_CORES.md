@@ -1,10 +1,13 @@
-# 🎨 ATUALIZAÇÃO: Cores nos Cards TOP 10 Videos
+# 🎨 ATUALIZAÇÃO: Cores TOP 10 + Hierarquia de Textos
 
 ## 📋 CONTEXTO
 
-Adicionar **cores de fundo por subniche** nos cards dos TOP 10 Videos (Nossos e Minerados).
+Aplicar **2 melhorias visuais** no Relatório Semanal:
 
-**OBJETIVO:** Cada vídeo terá cor de fundo de acordo com o subniche do seu canal.
+1. **Cores de fundo por subniche** nos cards TOP 10 (Nossos e Minerados)
+2. **Hierarquia de textos** em "Performance por Subniche" (aumentar fonte dos títulos)
+
+**OBJETIVO:** Visual mais profissional com hierarquia clara e cores temáticas.
 
 ---
 
@@ -44,16 +47,30 @@ O backend **JÁ FOI ATUALIZADO** e agora retorna o campo `canal_subnicho` em cad
 
 ## 🎨 O QUE VAI MUDAR
 
-### ANTES:
+### MUDANÇA 1: Cards TOP 10 com Cores
+
+**ANTES:**
 - Cards TOP 10 sem cor específica
 - Apenas medalhas 🥇🥈🥉 para top 3
 - Visual genérico
 
-### DEPOIS:
+**DEPOIS:**
 - ✨ Cada card com cor de fundo do subniche do canal
 - 🎯 Opacidade 25% (suave, não cansativo)
 - 🎨 Borda esquerda colorida (4px)
 - 🔥 Visual imediatamente reconhecível
+
+### MUDANÇA 2: Hierarquia de Textos
+
+**ANTES:**
+- Título do subniche com fonte normal
+- Sem hierarquia visual clara
+- Difícil distinguir títulos de conteúdo
+
+**DEPOIS:**
+- 📏 Títulos de subniche MAIORES (text-lg = 18px)
+- 🎯 Hierarquia visual clara
+- 💼 Profissional e organizado
 
 ---
 
@@ -67,6 +84,8 @@ src/components/WeeklyReportModal.tsx
 ```
 
 ---
+
+## PARTE 1: CORES NOS CARDS TOP 10
 
 ### PASSO 2: Atualizar seção TOP 10 NOSSOS
 
@@ -166,6 +185,42 @@ src/components/WeeklyReportModal.tsx
 
 ---
 
+## PARTE 2: HIERARQUIA DE TEXTOS
+
+### PASSO 4: Aumentar fonte dos títulos em "Performance por Subniche"
+
+**LOCALIZAR** esta seção (linhas ~270-275):
+
+```typescript
+<div className="flex items-center justify-between">
+  <ColoredBadge
+    text={perf.subniche}
+    backgroundColor={cores.fundo}
+    borderColor={cores.borda}
+  />
+  <div className="flex items-center gap-2">
+```
+
+**SUBSTITUIR POR:**
+
+```typescript
+<div className="flex items-center justify-between">
+  <ColoredBadge
+    text={perf.subniche}
+    backgroundColor={cores.fundo}
+    borderColor={cores.borda}
+    className="text-lg font-semibold"
+  />
+  <div className="flex items-center gap-2">
+```
+
+**O que mudou:**
+- ✅ Adicionado: `className="text-lg font-semibold"` ao ColoredBadge
+- ✅ `text-lg` = 18px (maior que o padrão 14px)
+- ✅ `font-semibold` = peso 600 (destaque visual)
+
+---
+
 ## ✅ VALIDAÇÃO - COMO TESTAR
 
 Após aplicar as mudanças:
@@ -180,26 +235,35 @@ Após aplicar as mudanças:
 - [ ] Clicar em "📊 Relatório Semanal"
 - [ ] Verificar seção "Top 10 - Nossos Vídeos"
 - [ ] Verificar seção "Top 10 - Vídeos Minerados"
+- [ ] Verificar seção "Performance por Subniche"
 
-### 3. Cores Aplicadas Corretamente
+### 3. MUDANÇA 1 - Cores Aplicadas Corretamente
 - [ ] Cada card tem cor de fundo suave
 - [ ] Opacidade visível (não muito forte)
 - [ ] Borda esquerda colorida (4px)
 - [ ] Cores diferentes para subniches diferentes
 - [ ] Mesma cor para vídeos do mesmo subniche
 
-### 4. Dados Corretos
+### 4. MUDANÇA 2 - Hierarquia de Textos
+- [ ] Títulos de subniche em "Performance" estão maiores
+- [ ] Font-size 18px (text-lg) aplicado
+- [ ] Font-weight 600 (font-semibold) aplicado
+- [ ] Hierarquia visual clara (título > conteúdo)
+
+### 5. Dados Corretos
 - [ ] Todos os 10 vídeos aparecem em cada seção
 - [ ] Medalhas 🥇🥈🥉 nos top 3
 - [ ] Views e subscribers corretos
 - [ ] Cores correspondem ao subniche do canal
+- [ ] Performance por Subniche mostra dados corretos
 
-### 5. Responsividade
+### 6. Responsividade
 - [ ] Cores funcionam em mobile (375px)
 - [ ] Cores funcionam em desktop (1920px)
 - [ ] Cards mantêm contraste e legibilidade
+- [ ] Hierarquia de texto funciona em todas as telas
 
-### 6. Console do Navegador
+### 7. Console do Navegador
 - [ ] Sem erros no console
 - [ ] Sem warnings relacionados a cores
 - [ ] Função `obterCorSubnicho()` retorna valores corretos
@@ -246,10 +310,16 @@ Após aplicar as mudanças:
 - Outras seções do relatório
 
 ### ✅ APENAS ALTERAR:
+
+**TOP 10 Videos:**
 - Adicionar `const cores = obterCorSubnicho(video.canal_subnicho);`
 - Adicionar `style` com backgroundColor e borderLeftColor
 - Ajustar `className` para incluir `border-l-4`
-- Nada mais!
+
+**Performance por Subniche:**
+- Adicionar `className="text-lg font-semibold"` ao ColoredBadge
+
+**Nada mais!**
 
 ---
 
@@ -306,19 +376,26 @@ Depois de aplicar, confirme:
 3. ✅ Opacidade está suave (25%)?
 4. ✅ Borda esquerda colorida visível?
 5. ✅ Cores diferentes para subniches diferentes?
+6. ✅ Títulos em "Performance por Subniche" estão maiores?
+7. ✅ Hierarquia visual clara em todo o relatório?
 
-**Se TUDO OK → TOP 10 com cores por subniche implementado!** 🚀
+**Se TUDO OK → Ambas melhorias implementadas!** 🚀
 
 ---
 
 ## 🎯 RESULTADO ESPERADO
 
-**TOP 10 Videos com:**
+**MUDANÇA 1 - TOP 10 Videos:**
 - ✨ Cores suaves por subniche (25% opacidade)
 - 🎨 Borda esquerda colorida (4px)
 - 🔥 Visual imediatamente reconhecível
 - 💼 Profissional e clean
-- 🧹 Elegante e moderno
+
+**MUDANÇA 2 - Performance por Subniche:**
+- 📏 Títulos maiores (18px)
+- 🎯 Hierarquia visual clara
+- 💼 Organizado e profissional
+- 🧹 Fácil leitura e compreensão
 
 ---
 

@@ -55,8 +55,8 @@ class ReportGenerator:
             'generated_at': datetime.now().isoformat(),
             'top_10_nossos': self._get_top_10_videos('nosso', week_start, week_end),
             'top_10_minerados': self._get_top_10_videos('minerado', week_start, week_end),
+            'top_10_keywords': self._get_top_10_keywords_by_subniche(),
             'performance_by_subniche': self._get_performance_by_subniche(week_start),
-            'gap_analysis': self._get_gap_analysis(),
             'recommended_actions': self._generate_recommendations()
         }
 
@@ -242,20 +242,33 @@ class ReportGenerator:
         return result
 
     def _get_total_views_for_subniche(self, subniche: str, date_start: str, date_end: str) -> int:
-        """Calcula total de views para um subniche no período"""
-        # Baseado nos últimos 30 dias de coleta, filtrar apenas views do período
+        """
+        Calcula total de views ÚNICO por vídeo para um subniche no período
+
+        IMPORTANTE: Remove duplicatas - cada vídeo conta apenas 1 vez (snapshot mais recente)
+        """
+        # Vídeos publicados nos últimos 30 dias
         cutoff_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
         response = self.db.table("videos_historico")\
-            .select("views_atuais, canais_monitorados!inner(subnicho, tipo)")\
+            .select("video_id, views_atuais, data_coleta, canais_monitorados!inner(subnicho, tipo)")\
             .eq("canais_monitorados.subnicho", subniche)\
             .eq("canais_monitorados.tipo", "nosso")\
-            .gte("data_coleta", cutoff_30d)\
+            .gte("data_publicacao", cutoff_30d)\
             .gte("data_coleta", date_start)\
             .lte("data_coleta", date_end)\
+            .order("data_coleta", desc=True)\
             .execute()
 
-        total_views = sum([v['views_atuais'] for v in response.data])
+        # Remove duplicatas: mantém apenas snapshot mais recente de cada vídeo
+        videos_dict = {}
+        for video in response.data:
+            video_id = video['video_id']
+            if video_id not in videos_dict:
+                videos_dict[video_id] = video['views_atuais']
+
+        total_views = sum(videos_dict.values())
+        print(f"[ReportGenerator] {subniche}: {len(videos_dict)} vídeos únicos, {total_views:,} views totais no período")
         return total_views
 
     def _generate_insight_for_subniche(self, subniche: str, growth_pct: float, views: int) -> str:
@@ -305,6 +318,39 @@ class ReportGenerator:
 
         print(f"[ReportGenerator] {total_gaps} gaps encontrados em {len(gaps_by_subniche)} subniches")
         return gaps_by_subniche
+
+    def _get_top_10_keywords_by_subniche(self) -> Dict[str, List[Dict]]:
+        """
+        Gera top 10 keywords para cada subniche ativo (últimos 30 dias)
+
+        Returns:
+            Dict com keywords por subniche: {subniche: [keywords]}
+        """
+        print("[ReportGenerator] Gerando top 10 keywords por subniche...")
+
+        # Buscar subniches ativos
+        subniches_response = self.db.table("canais_monitorados")\
+            .select("subnicho")\
+            .eq("tipo", "nosso")\
+            .eq("status", "ativo")\
+            .execute()
+
+        subniches = list(set([c['subnicho'] for c in subniches_response.data]))
+
+        # Gerar keywords para cada subniche
+        keywords_by_subniche = {}
+        total_keywords = 0
+
+        for subniche in subniches:
+            # Usa analyzer.analyze_keywords() que JÁ filtra por subniche
+            keywords = self.analyzer.analyze_keywords(subniche=subniche, period_days=30)
+
+            if keywords:
+                keywords_by_subniche[subniche] = keywords[:10]  # Top 10
+                total_keywords += len(keywords[:10])
+
+        print(f"[ReportGenerator] {total_keywords} keywords geradas para {len(keywords_by_subniche)} subniches")
+        return keywords_by_subniche
 
     # =========================================================================
     # ANÁLISES AVANÇADAS (ALÉM DE TÍTULOS)
@@ -516,35 +562,7 @@ class ReportGenerator:
                 })
 
         # =====================================================================
-        # 2. CONCORRENTES - O QUE ELES FAZEM BEM E DEVEMOS COPIAR
-        # =====================================================================
-        gaps = self._get_gap_analysis()
-        gap_count = 0
-        for subniche, gap_list in list(gaps.items())[:3]:  # Top 3 subniches com gaps
-            if gap_list and gap_count < 3:
-                top_gap = gap_list[0]
-
-                # Estrutura NOVA dos gaps
-                gap_type_translate = {
-                    'duration': 'Duração de vídeos',
-                    'frequency': 'Frequência de postagem',
-                    'engagement': 'Engajamento'
-                }
-                gap_type = gap_type_translate.get(top_gap['type'], top_gap['type'])
-
-                recommendations.append({
-                    'priority': 'high',
-                    'category': 'CONCORRENTES - COPIAR',
-                    'title': f"🎯 {gap_type} em {subniche}",
-                    'description': f"{top_gap['title']}: Você está em {top_gap['your_value']}, concorrentes em {top_gap['competitor_value']}. {top_gap['impact_description']}",
-                    'action': '\n'.join([f"• {action}" for action in top_gap['actions']]),
-                    'impact': top_gap['priority_text'],
-                    'effort': top_gap['effort']
-                })
-                gap_count += 1
-
-        # =====================================================================
-        # 3. NOSSOS CANAIS - O QUE FAZEMOS BEM E DEVEMOS CONTINUAR
+        # 2. NOSSOS CANAIS - O QUE FAZEMOS BEM E DEVEMOS CONTINUAR
         # =====================================================================
         # Identifica top performers (subniches com crescimento >15%)
         top_performers = sorted(performance_data, key=lambda x: x['growth_percentage'], reverse=True)[:2]
@@ -580,7 +598,7 @@ class ReportGenerator:
                     })
 
         # =====================================================================
-        # 4. NOSSOS CANAIS - O QUE FAZEMOS MAL E DEVEMOS MELHORAR
+        # 3. NOSSOS CANAIS - O QUE FAZEMOS MAL E DEVEMOS MELHORAR
         # =====================================================================
         # Identifica underperformers (abaixo da média)
         if performance_data:
@@ -599,7 +617,7 @@ class ReportGenerator:
                 })
 
         # =====================================================================
-        # 5. FREQUÊNCIA DE UPLOAD - Análise Comparativa
+        # 4. FREQUÊNCIA DE UPLOAD - Análise Comparativa
         # =====================================================================
         frequency_data = self._analyze_upload_frequency()
 
@@ -626,7 +644,7 @@ class ReportGenerator:
                 })
 
         # =====================================================================
-        # 7. ENGAGEMENT (LIKES/VIEWS) - Análise Comparativa
+        # 5. ENGAGEMENT (LIKES/VIEWS) - Análise Comparativa
         # =====================================================================
         engagement_data = self._analyze_engagement()
 
@@ -643,7 +661,7 @@ class ReportGenerator:
                 })
 
         # =====================================================================
-        # 8. DURAÇÃO DE VÍDEOS - Análise de Sucesso
+        # 6. DURAÇÃO DE VÍDEOS - Análise de Sucesso
         # =====================================================================
         duration_data = self._analyze_video_duration()
 

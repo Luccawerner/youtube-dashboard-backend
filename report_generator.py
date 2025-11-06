@@ -551,26 +551,32 @@ class ReportGenerator:
 
         for perf in top_performers:
             if perf['growth_percentage'] > 15:
-                # Busca padrão de sucesso desse subniche
-                patterns_response = self.db.table("title_patterns")\
-                    .select("*")\
-                    .eq("subniche", perf['subniche'])\
-                    .eq("analyzed_date", datetime.now().strftime("%Y-%m-%d"))\
-                    .order("avg_views", desc=True)\
-                    .limit(1)\
+                # Busca vídeos TOP REAIS desse subniche (últimos 30 dias)
+                cutoff_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+                top_videos_response = self.db.table("videos_historico")\
+                    .select("titulo, views_atuais, canais_monitorados!inner(tipo, subnicho)")\
+                    .eq("canais_monitorados.tipo", "nosso")\
+                    .eq("canais_monitorados.subnicho", perf['subniche'])\
+                    .gte("data_publicacao", cutoff_date)\
+                    .gte("views_atuais", 50000)\
+                    .order("views_atuais", desc=True)\
+                    .limit(3)\
                     .execute()
 
-                if patterns_response.data:
-                    pattern = patterns_response.data[0]
+                if top_videos_response.data and len(top_videos_response.data) > 0:
+                    top_video = top_videos_response.data[0]
+                    avg_views = sum(v['views_atuais'] for v in top_videos_response.data) / len(top_videos_response.data)
+
                     recommendations.append({
                         'priority': 'medium',
                         'category': 'NOSSOS CANAIS - CONTINUAR',
                         'title': f"✅ {perf['subniche']} performando excelente (+{perf['growth_percentage']:.1f}%)",
-                        'description': f"Crescimento de {perf['growth_percentage']:.1f}% nas views. Fórmula está funcionando muito bem!",
-                        'action': f"MANTER estratégia atual:\n• Continuar usando padrão: {pattern['pattern_structure']}\n• Exemplo de sucesso: \"{pattern['example_title']}\"\n• Replicar em outros subniches se possível",
+                        'description': f"Crescimento de {perf['growth_percentage']:.1f}% nas views. {len(top_videos_response.data)} vídeos com 50k+ views nos últimos 30 dias!",
+                        'action': f"MANTER estratégia atual:\n• Continuar modelo que funciona (avg {avg_views:,.0f} views)\n• Top vídeo: \"{top_video['titulo']}\" ({top_video['views_atuais']:,} views)\n• Analisar esses {len(top_videos_response.data)} vídeos: o que têm em comum?\n• Replicar formato em outros subniches se possível",
                         'impact': 'MÉDIO',
                         'effort': 'Baixo',
-                        'avg_views': pattern['avg_views']
+                        'avg_views': int(avg_views)
                     })
 
         # =====================================================================
@@ -593,31 +599,7 @@ class ReportGenerator:
                 })
 
         # =====================================================================
-        # 5. OPORTUNIDADES - KEYWORDS TRENDING
-        # =====================================================================
-        # Busca keywords que estão ganhando tração (últimos 7 dias)
-        keywords_response = self.db.table("keyword_analysis")\
-            .select("*")\
-            .eq("period_days", 7)\
-            .eq("analyzed_date", datetime.now().strftime("%Y-%m-%d"))\
-            .order("frequency", desc=True)\
-            .limit(3)\
-            .execute()
-
-        if keywords_response.data:
-            trending_keywords = [k['keyword'] for k in keywords_response.data[:3]]
-            recommendations.append({
-                'priority': 'medium',
-                'category': 'OPORTUNIDADE - TRENDING',
-                'title': f"📈 Keywords em alta nos últimos 7 dias",
-                'description': f"Palavras-chave ganhando tração: {', '.join(trending_keywords)}",
-                'action': f"Criar vídeos priorizando essas keywords nos títulos, descrições e tags. Aproveitar a onda de interesse!",
-                'impact': 'MÉDIO',
-                'effort': 'Baixo'
-            })
-
-        # =====================================================================
-        # 6. FREQUÊNCIA DE UPLOAD - Análise Comparativa
+        # 5. FREQUÊNCIA DE UPLOAD - Análise Comparativa
         # =====================================================================
         frequency_data = self._analyze_upload_frequency()
 

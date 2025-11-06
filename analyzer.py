@@ -784,14 +784,23 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
     if analysis_type == 'keywords':
         # Salvar em keyword_analysis
         for item in data:
-            db_client.table("keyword_analysis").upsert({
+            record = {
                 'keyword': item['keyword'],
                 'period_days': period_days,
                 'frequency': item['frequency'],
                 'avg_views': item['avg_views'],
                 'video_count': item['video_count'],
                 'analyzed_date': today
-            }, on_conflict='keyword,period_days,analyzed_date').execute()
+            }
+
+            # Adicionar subniche se foi fornecido
+            if subniche:
+                record['subniche'] = subniche
+                conflict_fields = 'keyword,subniche,period_days,analyzed_date'
+            else:
+                conflict_fields = 'keyword,period_days,analyzed_date'
+
+            db_client.table("keyword_analysis").upsert(record, on_conflict=conflict_fields).execute()
 
     elif analysis_type == 'patterns':
         # Salvar em title_patterns
@@ -828,19 +837,20 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
             }, on_conflict='canal_id,subniche,snapshot_date').execute()
 
     elif analysis_type == 'gaps':
-        # Salvar em gap_analysis
+        # Salvar em gap_analysis (NOVA ESTRUTURA)
         week_start = (datetime.now() - timedelta(days=datetime.now().weekday())).strftime("%Y-%m-%d")
         week_end = (datetime.now() + timedelta(days=6-datetime.now().weekday())).strftime("%Y-%m-%d")
 
         for item in data:
+            # Converter nova estrutura para formato da tabela (compatibilidade)
             db_client.table("gap_analysis").upsert({
                 'subniche': subniche,
-                'gap_title': item['gap_title'],
-                'gap_description': item['gap_description'],
-                'competitor_count': item['competitor_count'],
-                'avg_views': item['avg_views'],
-                'example_videos': json.dumps(item['example_videos']),
-                'recommendation': item['recommendation'],
+                'gap_title': item['title'],  # Nova estrutura usa 'title'
+                'gap_description': item['impact_description'],  # Nova estrutura usa 'impact_description'
+                'competitor_count': 0,  # Não usado mais
+                'avg_views': 0,  # Não aplicável para gaps de duração/frequência
+                'example_videos': json.dumps([]),  # Vazio
+                'recommendation': '\n'.join(item['actions']),  # Nova estrutura usa lista 'actions'
                 'analyzed_week_start': week_start,
                 'analyzed_week_end': week_end
             }, on_conflict='subniche,gap_title,analyzed_week_start').execute()

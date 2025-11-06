@@ -299,16 +299,8 @@ class ReportGenerator:
             gaps_list = self.analyzer.analyze_gaps(subniche)
 
             if gaps_list:
-                # Converter formato novo para formato antigo (compatibilidade)
-                gaps_by_subniche[subniche] = []
-                for gap in gaps_list:
-                    gaps_by_subniche[subniche].append({
-                        'gap_title': gap['title'],
-                        'description': gap['impact_description'],
-                        'competitor_count': 0,  # Não usado mais
-                        'avg_views': 0,  # Não aplicável para gaps de duração/frequência
-                        'recommendation': '\n'.join(gap['actions'])
-                    })
+                # Retornar formato NOVO (não converter!)
+                gaps_by_subniche[subniche] = gaps_list
                 total_gaps += len(gaps_list)
 
         print(f"[ReportGenerator] {total_gaps} gaps encontrados em {len(gaps_by_subniche)} subniches")
@@ -531,15 +523,23 @@ class ReportGenerator:
         for subniche, gap_list in list(gaps.items())[:3]:  # Top 3 subniches com gaps
             if gap_list and gap_count < 3:
                 top_gap = gap_list[0]
+
+                # Estrutura NOVA dos gaps
+                gap_type_translate = {
+                    'duration': 'Duração de vídeos',
+                    'frequency': 'Frequência de postagem',
+                    'engagement': 'Engajamento'
+                }
+                gap_type = gap_type_translate.get(top_gap['type'], top_gap['type'])
+
                 recommendations.append({
                     'priority': 'high',
                     'category': 'CONCORRENTES - COPIAR',
-                    'title': f"🎯 Oportunidade em {subniche}",
-                    'description': f"{top_gap['gap_title']}: {top_gap['competitor_count']} concorrentes fazem isso e nós não. Média de {top_gap['avg_views']:,} views.",
-                    'action': top_gap['recommendation'],
-                    'impact': 'ALTO',
-                    'effort': 'Médio',
-                    'avg_views': top_gap['avg_views']
+                    'title': f"🎯 {gap_type} em {subniche}",
+                    'description': f"{top_gap['title']}: Você está em {top_gap['your_value']}, concorrentes em {top_gap['competitor_value']}. {top_gap['impact_description']}",
+                    'action': '\n'.join([f"• {action}" for action in top_gap['actions']]),
+                    'impact': top_gap['priority_text'],
+                    'effort': top_gap['effort']
                 })
                 gap_count += 1
 

@@ -230,12 +230,20 @@ class ReportGenerator:
             # Gerar insight automático
             insight = self._generate_insight_for_subniche(subniche, growth_pct, views_current)
 
+            # Totais por período de publicação
+            total_7d = self._get_total_views_by_publication(subniche, days=7)
+            total_30d = self._get_total_views_by_publication(subniche, days=30)
+
             result.append({
                 'subniche': subniche,
                 'views_current_week': views_current,
                 'views_previous_week': views_previous,
                 'growth_percentage': round(growth_pct, 1),
-                'insight': insight
+                'insight': insight,
+                'total_views_7d': total_7d['total_views'],
+                'video_count_7d': total_7d['video_count'],
+                'total_views_30d': total_30d['total_views'],
+                'video_count_30d': total_30d['video_count']
             })
 
         print(f"[ReportGenerator] {len(result)} subniches analisados")
@@ -270,6 +278,44 @@ class ReportGenerator:
         total_views = sum(videos_dict.values())
         print(f"[ReportGenerator] {subniche}: {len(videos_dict)} vídeos únicos, {total_views:,} views totais no período")
         return total_views
+
+    def _get_total_views_by_publication(self, subniche: str, days: int) -> Dict:
+        """
+        Calcula total de views de vídeos PUBLICADOS nos últimos X dias
+
+        Args:
+            subniche: Nome do subniche
+            days: Janela de publicação (7 ou 30 dias)
+
+        Returns:
+            Dict com total_views e video_count
+        """
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        # Buscar vídeos publicados nos últimos X dias
+        response = self.db.table("videos_historico")\
+            .select("video_id, views_atuais, data_coleta, canais_monitorados!inner(subnicho, tipo)")\
+            .eq("canais_monitorados.subnicho", subniche)\
+            .eq("canais_monitorados.tipo", "nosso")\
+            .gte("data_publicacao", cutoff_date)\
+            .order("data_coleta", desc=True)\
+            .execute()
+
+        # Remove duplicatas: mantém apenas snapshot mais recente de cada vídeo
+        videos_dict = {}
+        for video in response.data:
+            video_id = video['video_id']
+            if video_id not in videos_dict:
+                videos_dict[video_id] = video['views_atuais']
+
+        total_views = sum(videos_dict.values())
+        video_count = len(videos_dict)
+
+        print(f"[ReportGenerator] {subniche} ({days}d): {video_count} vídeos publicados, {total_views:,} views totais")
+        return {
+            'total_views': total_views,
+            'video_count': video_count
+        }
 
     def _generate_insight_for_subniche(self, subniche: str, growth_pct: float, views: int) -> str:
         """Gera insight automático baseado na performance"""

@@ -91,7 +91,7 @@ class ReportGenerator:
 
         # Query: buscar TODOS os vídeos (não limitar ainda)
         response = self.db.table("videos_historico")\
-            .select("*, canais_monitorados!inner(nome_canal, tipo, id)")\
+            .select("*, canais_monitorados!inner(nome_canal, tipo, id, subnicho)")\
             .eq("canais_monitorados.tipo", tipo_canal)\
             .gte("data_publicacao", cutoff_date_30d)\
             .gte("views_atuais", 10000)\
@@ -134,6 +134,7 @@ class ReportGenerator:
                 'titulo': video['titulo'],
                 'canal_nome': video['canais_monitorados']['nome_canal'],
                 'canal_id': canal_id,
+                'canal_subnicho': video['canais_monitorados']['subnicho'],
                 'views_atuais': video['views_atuais'],
                 'likes': video.get('likes', 0),
                 'duracao': video.get('duracao', 0),

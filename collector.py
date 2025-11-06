@@ -137,6 +137,9 @@ class YouTubeCollector:
         self.max_retries = 3
         self.base_delay = 0.8
 
+        # 🚀 OTIMIZAÇÃO: Cache de channel_id para evitar requisições duplicadas
+        self.channel_id_cache: Dict[str, str] = {}  # {url_canal: channel_id}
+
         logger.info(f"🚀 YouTube collector initialized with {len(self.api_keys)} API keys")
         logger.info(f"📊 Total quota disponível: {len(self.api_keys) * 10000:,} units/dia")
         logger.info(f"📊 Rate limiter: {self.rate_limiters[0].max_requests} req/{self.rate_limiters[0].time_window}s per key")
@@ -147,6 +150,9 @@ class YouTubeCollector:
         self.total_quota_units = 0
         self.quota_units_per_key = {i: 0 for i in range(len(self.api_keys))}
         self.quota_units_per_canal = {}
+
+        # 🚀 OTIMIZAÇÃO: NÃO limpar channel_id_cache - pode reusar entre coletas
+        # Cache persiste até restart do servidor (economiza requisições)
 
         # 🆕 RESETAR CHAVES SUSPENSAS (podem ter voltado)
         if self.suspended_keys:
@@ -325,8 +331,9 @@ class YouTubeCollector:
                 self.increment_quota_counter(canal_name, request_cost)
                 self.rate_limiters[self.current_key_index].record_request()
 
-                if self.total_quota_units > 0:
-                    await asyncio.sleep(self.base_delay)
+                # 🚀 OTIMIZAÇÃO: Removido base_delay - RateLimiter já controla requisições
+                # if self.total_quota_units > 0:
+                #     await asyncio.sleep(self.base_delay)
 
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
 
@@ -470,20 +477,39 @@ class YouTubeCollector:
         return None
 
     async def get_channel_id(self, url: str, canal_name: str) -> Optional[str]:
-        """Get channel ID from URL"""
+        """
+        Get channel ID from URL
+
+        🚀 OTIMIZAÇÃO: Usa cache para evitar requisições duplicadas
+        - Se já resolvemos este URL antes, retorna do cache (0 requisições)
+        - Cache persiste entre coletas até restart do servidor
+        """
+        # 1. Verificar cache primeiro
+        if url in self.channel_id_cache:
+            logger.debug(f"⚡ {canal_name}: Cache hit para channel_id")
+            return self.channel_id_cache[url]
+
+        # 2. Resolver normalmente (código existente)
         identifier, id_type = self.extract_channel_identifier(url)
 
         if not identifier:
             logger.error(f"❌ {canal_name}: Não foi possível extrair identificador da URL: {url}")
             return None
 
+        channel_id = None
+
         if id_type == 'id' and self.is_valid_channel_id(identifier):
-            return identifier
+            channel_id = identifier
 
-        if id_type in ['handle', 'username']:
-            return await self.get_channel_id_from_handle(identifier, canal_name)
+        elif id_type in ['handle', 'username']:
+            channel_id = await self.get_channel_id_from_handle(identifier, canal_name)
 
-        return None
+        # 3. Adicionar ao cache se resolveu com sucesso
+        if channel_id:
+            self.channel_id_cache[url] = channel_id
+            logger.debug(f"💾 {canal_name}: Channel ID cacheado: {channel_id}")
+
+        return channel_id
 
     async def get_channel_info(self, channel_id: str, canal_name: str) -> Optional[Dict[str, Any]]:
         """Get channel info"""

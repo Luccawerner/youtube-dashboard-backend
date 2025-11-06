@@ -1142,7 +1142,8 @@ async def run_collection_job():
                 
                 await db.update_last_collection(canal['id'])
 
-                await asyncio.sleep(1)
+                # 🚀 OTIMIZAÇÃO: Removido sleep entre canais - RateLimiter já controla
+                # await asyncio.sleep(1)
 
                 # Atualizar progresso no banco a cada 10 canais
                 if index % 10 == 0 and coleta_id:

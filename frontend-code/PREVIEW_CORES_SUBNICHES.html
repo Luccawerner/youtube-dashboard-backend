@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preview - Cores Vibrantes dos Subniches</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 2.5rem;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 12px;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+
+        .card-header {
+            padding: 20px;
+            border-left: 4px solid;
+            position: relative;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            border: 2px solid;
+            margin-bottom: 12px;
+        }
+
+        .subniche-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 8px;
+        }
+
+        .color-info {
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            font-family: 'Courier New', monospace;
+        }
+
+        .card-body {
+            padding: 20px;
+            background: rgba(15, 23, 42, 0.6);
+        }
+
+        .example-text {
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+
+        .tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            opacity: 0.8;
+        }
+
+        .footer {
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            color: white;
+            margin-top: 40px;
+        }
+
+        .footer h2 {
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+        }
+
+        .footer p {
+            color: #94a3b8;
+            line-height: 1.8;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .approve-section {
+            background: rgba(16, 185, 129, 0.1);
+            border: 2px solid #10B981;
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .approve-section h3 {
+            color: #10B981;
+            margin-bottom: 10px;
+        }
+
+        .approve-section p {
+            color: #cbd5e1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Preview - Cores Vibrantes dos Subniches</h1>
+        <p class="subtitle">Paleta moderna com gradientes temáticos | Saturação 70-85% | Estilo Stripe/Linear</p>
+
+        <div class="grid">
+            <!-- 1. Contos Familiares -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(255, 140, 66, 0.15); border-left-color: #E86339;">
+                    <div class="badge" style="background-color: #FF8C42; border-color: #E86339; color: white;">
+                        🏡 Contos Familiares
+                    </div>
+                    <div class="subniche-name">Contos Familiares</div>
+                    <div class="color-info">
+                        Fundo: #FF8C42 | Borda: #E86339
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Laranja coral vibrante. Transmite calor familiar, aconchego e nostalgia.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #FF8C42; color: white;">Família</span>
+                        <span class="tag" style="background-color: #E86339; color: white;">Aconchego</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Terror -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(239, 68, 68, 0.15); border-left-color: #B91C1C;">
+                    <div class="badge" style="background-color: #EF4444; border-color: #B91C1C; color: white;">
+                        🔴 Terror
+                    </div>
+                    <div class="subniche-name">Terror</div>
+                    <div class="color-info">
+                        Fundo: #EF4444 | Borda: #B91C1C
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Vermelho sangue intenso. Evoca medo, perigo e dramaticidade.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #EF4444; color: white;">Suspense</span>
+                        <span class="tag" style="background-color: #B91C1C; color: white;">Medo</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Histórias Sombrias -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(139, 92, 246, 0.15); border-left-color: #6D28D9;">
+                    <div class="badge" style="background-color: #8B5CF6; border-color: #6D28D9; color: white;">
+                        🌑 Histórias Sombrias
+                    </div>
+                    <div class="subniche-name">Histórias Sombrias</div>
+                    <div class="color-info">
+                        Fundo: #8B5CF6 | Borda: #6D28D9
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Roxo profundo misterioso. Representa trevas, mistério e noite.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #8B5CF6; color: white;">Mistério</span>
+                        <span class="tag" style="background-color: #6D28D9; color: white;">Sombrio</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Histórias Aleatórias -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(236, 72, 153, 0.15); border-left-color: #BE185D;">
+                    <div class="badge" style="background-color: #EC4899; border-color: #BE185D; color: white;">
+                        🎭 Histórias Aleatórias
+                    </div>
+                    <div class="subniche-name">Histórias Aleatórias</div>
+                    <div class="color-info">
+                        Fundo: #EC4899 | Borda: #BE185D
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Rosa neon vibrante. Simboliza variedade, diversão e surpresa.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #EC4899; color: white;">Variado</span>
+                        <span class="tag" style="background-color: #BE185D; color: white;">Dinâmico</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Relatos de Guerra -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(16, 185, 129, 0.15); border-left-color: #047857;">
+                    <div class="badge" style="background-color: #10B981; border-color: #047857; color: white;">
+                        ⚔️ Relatos de Guerra
+                    </div>
+                    <div class="subniche-name">Relatos de Guerra</div>
+                    <div class="color-info">
+                        Fundo: #10B981 | Borda: #047857
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Verde esmeralda militar. Evoca história bélica, força e respeito.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #10B981; color: white;">Histórico</span>
+                        <span class="tag" style="background-color: #047857; color: white;">Militar</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 6. Stickman -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(59, 130, 246, 0.15); border-left-color: #1D4ED8;">
+                    <div class="badge" style="background-color: #3B82F6; border-color: #1D4ED8; color: white;">
+                        🎨 Stickman
+                    </div>
+                    <div class="subniche-name">Stickman</div>
+                    <div class="color-info">
+                        Fundo: #3B82F6 | Borda: #1D4ED8
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Azul vibrante educativo. Transmite clareza, simplicidade e aprendizado.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #3B82F6; color: white;">Educativo</span>
+                        <span class="tag" style="background-color: #1D4ED8; color: white;">Clean</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 7. Antiguidade -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(245, 158, 11, 0.15); border-left-color: #D97706;">
+                    <div class="badge" style="background-color: #F59E0B; border-color: #D97706; color: white;">
+                        🏛️ Antiguidade
+                    </div>
+                    <div class="subniche-name">Antiguidade</div>
+                    <div class="color-info">
+                        Fundo: #F59E0B | Borda: #D97706
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Dourado bronze histórico. Representa civilizações antigas e majestade.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #F59E0B; color: #1e293b;">Antigo</span>
+                        <span class="tag" style="background-color: #D97706; color: white;">Clássico</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 8. Histórias Motivacionais -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(251, 191, 36, 0.15); border-left-color: #F59E0B;">
+                    <div class="badge" style="background-color: #FBBF24; border-color: #F59E0B; color: #1e293b;">
+                        ⭐ Histórias Motivacionais
+                    </div>
+                    <div class="subniche-name">Histórias Motivacionais</div>
+                    <div class="color-info">
+                        Fundo: #FBBF24 | Borda: #F59E0B
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Amarelo sol radiante. Inspira esperança, energia e positividade.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #FBBF24; color: #1e293b;">Inspirador</span>
+                        <span class="tag" style="background-color: #F59E0B; color: white;">Positivo</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 9. Mistérios -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(99, 102, 241, 0.15); border-left-color: #4338CA;">
+                    <div class="badge" style="background-color: #6366F1; border-color: #4338CA; color: white;">
+                        🔍 Mistérios
+                    </div>
+                    <div class="subniche-name">Mistérios</div>
+                    <div class="color-info">
+                        Fundo: #6366F1 | Borda: #4338CA
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Índigo elétrico investigativo. Evoca enigma, intriga e inteligência.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #6366F1; color: white;">Enigma</span>
+                        <span class="tag" style="background-color: #4338CA; color: white;">Intriga</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 10. Pessoas Desaparecidas -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(100, 116, 139, 0.15); border-left-color: #475569;">
+                    <div class="badge" style="background-color: #64748B; border-color: #475569; color: white;">
+                        🌫️ Pessoas Desaparecidas
+                    </div>
+                    <div class="subniche-name">Pessoas Desaparecidas</div>
+                    <div class="color-info">
+                        Fundo: #64748B | Borda: #475569
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Cinza azulado sombrio. Transmite ausência, incerteza e melancolia.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #64748B; color: white;">Ausência</span>
+                        <span class="tag" style="background-color: #475569; color: white;">Incerto</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 11. Psicologia & Mindset -->
+            <div class="card">
+                <div class="card-header" style="background-color: rgba(20, 184, 166, 0.15); border-left-color: #0D9488;">
+                    <div class="badge" style="background-color: #14B8A6; border-color: #0D9488; color: white;">
+                        🧠 Psicologia & Mindset
+                    </div>
+                    <div class="subniche-name">Psicologia & Mindset</div>
+                    <div class="color-info">
+                        Fundo: #14B8A6 | Borda: #0D9488
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="example-text">Teal vibrante cerebral. Representa mente, crescimento e transformação.</p>
+                    <div class="tags">
+                        <span class="tag" style="background-color: #14B8A6; color: white;">Mental</span>
+                        <span class="tag" style="background-color: #0D9488; color: white;">Crescimento</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <h2>Como Funciona no Dashboard</h2>
+            <p>
+                <strong>Fundo:</strong> Aplicado com 15% de opacidade nos cards (background sutil)<br>
+                <strong>Borda:</strong> Aplicada com 2px de largura nos cards de destaque<br>
+                <strong>Badge:</strong> Usa cor de fundo sólida com borda mais escura<br><br>
+                Essas cores serão aplicadas em <strong>TODOS</strong> os componentes do dashboard que usam subniches:<br>
+                Performance, Gap Analysis, Ações Recomendadas, Carousels, etc.
+            </p>
+
+            <div class="approve-section">
+                <h3>✅ Gostou das Cores?</h3>
+                <p>
+                    Se aprovado, use o arquivo <strong>PROMPT_LOVABLE_CORES_VIBRANTES.md</strong><br>
+                    para atualizar automaticamente no Lovable!
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

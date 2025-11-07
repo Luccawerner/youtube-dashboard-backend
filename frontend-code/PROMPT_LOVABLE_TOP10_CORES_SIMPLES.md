@@ -3,8 +3,10 @@
 ## 🎯 OBJETIVO
 Colorir os cards dos TOP 10 Videos (Nossos e Minerados) de acordo com o subniche do canal.
 
+**OPACIDADE:** 20% (cor de fundo suave e elegante)
+
 **EXEMPLO:**
-- Vídeo do canal "Relatos Oscuros" → Subniche "Historias Sombrias" → Cor roxa
+- Vídeo do canal "Relatos Oscuros" → Subniche "Historias Sombrias" → Cor roxa (20% opacidade)
 
 ---
 
@@ -60,7 +62,7 @@ const cores = obterCorSubnicho(video.canal_subnicho);
   key={video.video_id}
   className="flex items-start gap-3 p-3 rounded-lg border-l-4"
   style={{
-    backgroundColor: cores.fundo + '25',
+    backgroundColor: cores.fundo + '20',
     borderLeftColor: cores.borda,
   }}
 >
@@ -69,7 +71,7 @@ const cores = obterCorSubnicho(video.canal_subnicho);
 **O que mudou:**
 - ❌ REMOVIDO: `className` dinâmico com condições
 - ✅ ADICIONADO: `border-l-4` na className
-- ✅ ADICIONADO: `style` com backgroundColor e borderLeftColor
+- ✅ ADICIONADO: `style` com backgroundColor (opacidade 20%) e borderLeftColor
 
 ---
 
@@ -171,7 +173,7 @@ const cores = obterCorSubnicho(video.canal_subnicho);
       key={video.video_id}
       className="flex items-start gap-3 p-3 rounded-lg border-l-4"
       style={{                                             // ✅ ADICIONADO
-        backgroundColor: cores.fundo + '25',               // ✅ ADICIONADO
+        backgroundColor: cores.fundo + '20',               // ✅ ADICIONADO (opacidade 20%)
         borderLeftColor: cores.borda,                      // ✅ ADICIONADO
       }}                                                   // ✅ ADICIONADO
     >
@@ -185,7 +187,7 @@ const cores = obterCorSubnicho(video.canal_subnicho);
 2. **`obterCorSubnicho()`** - Função que retorna as cores do subniche
 3. **`cores.fundo`** - Cor de fundo (ex: "#7C3AED" para roxo)
 4. **`cores.borda`** - Cor da borda (ex: "#5B21B6" para roxo escuro)
-5. **`+ '25'`** - Adiciona opacidade 25% (ex: "#7C3AED25")
+5. **`+ '20'`** - Adiciona opacidade 20% (ex: "#7C3AED20")
 
 ---
 
@@ -249,7 +251,7 @@ Quando aplicar, os cards terão estas cores:
 ## 🎯 RESULTADO ESPERADO
 
 **Cada vídeo TOP 10 terá:**
-- ✅ Cor de fundo suave (25% opacidade)
+- ✅ Cor de fundo suave (20% opacidade)
 - ✅ Borda esquerda colorida (4px)
 - ✅ Cor do subniche do canal
 - ✅ Visual profissional e organizado

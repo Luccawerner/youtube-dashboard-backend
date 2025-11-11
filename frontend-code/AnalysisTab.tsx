@@ -1,9 +1,10 @@
 // src/components/AnalysisTab.tsx
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '@/services/api';
-import { KeywordsRanking } from './KeywordsRanking';
+// import { KeywordsRanking } from './KeywordsRanking'; // DESABILITADO - 2025-01-07
 import { TitlePatternsCarousel } from './TitlePatternsCarousel';
 import { TopChannelsCarousel } from './TopChannelsCarousel';
+import { SubnicheTrendsCard } from './SubnicheTrendsCard'; // NOVO - 2025-01-07
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
@@ -52,14 +53,17 @@ export function AnalysisTab() {
 
   return (
     <div className="space-y-6">
-      {/* Top 20 Keywords */}
-      <KeywordsRanking />
+      {/* 1. Tendências por Subniche (2025-01-07) */}
+      <SubnicheTrendsCard />
 
-      {/* Top 5 Padrões de Título */}
+      {/* 2. Top 5 Canais */}
+      <TopChannelsCarousel subniches={subniches} />
+
+      {/* 3. Top 5 Padrões de Título */}
       <TitlePatternsCarousel subniches={subniches} />
 
-      {/* Top 5 Canais */}
-      <TopChannelsCarousel subniches={subniches} />
+      {/* Top 20 Keywords - DESABILITADO (2025-01-07) */}
+      {/* <KeywordsRanking /> */}
     </div>
   );
 }

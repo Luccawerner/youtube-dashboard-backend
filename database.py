@@ -889,12 +889,120 @@ class SupabaseClient:
                 .select("subnicho")\
                 .eq("status", "ativo")\
                 .execute()
-            
+
             if response.data:
                 subniches = list(set([c['subnicho'] for c in response.data]))
                 return sorted(subniches)
-            
+
             return []
         except Exception as e:
             logger.error(f"Erro ao buscar subniches: {e}")
             return []
+
+    # =========================================================================
+    # SUBNICHE TRENDS SNAPSHOT - New Functions
+    # Added by Claude Code - 2025-01-07
+    # =========================================================================
+
+    async def save_subniche_trends_snapshot(self, trends_data: List[Dict]) -> bool:
+        """
+        Salva snapshot de tendências por subniche.
+
+        Args:
+            trends_data: Lista de dicts com dados de tendências
+                Formato: {
+                    'subnicho': str,
+                    'period_days': int,
+                    'total_videos': int,
+                    'avg_views': int,
+                    'engagement_rate': float,
+                    'trend_percent': float,
+                    'analyzed_date': str (YYYY-MM-DD)
+                }
+
+        Returns:
+            bool: True se sucesso, False se erro
+        """
+        try:
+            if not trends_data:
+                logger.warning("Nenhum dado de trends para salvar")
+                return False
+
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # Preparar dados para insert/upsert
+            records = []
+            for trend in trends_data:
+                records.append({
+                    "subnicho": trend['subnicho'],
+                    "period_days": trend['period_days'],
+                    "total_videos": trend.get('total_videos', 0),
+                    "avg_views": trend.get('avg_views', 0),
+                    "engagement_rate": trend.get('engagement_rate', 0.0),
+                    "trend_percent": trend.get('trend_percent', 0.0),
+                    "snapshot_date": today,
+                    "analyzed_date": trend.get('analyzed_date', today)
+                })
+
+            # Upsert: cria novo ou atualiza se já existe (baseado em UNIQUE constraint)
+            response = self.supabase.table("subniche_trends_snapshot").upsert(records).execute()
+
+            logger.info(f"✅ Salvos {len(records)} registros de subniche trends")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erro ao salvar subniche trends snapshot: {e}")
+            return False
+
+    async def get_subniche_trends_snapshot(self, period_days: int) -> List[Dict]:
+        """
+        Busca snapshot mais recente de tendências por subniche.
+
+        Args:
+            period_days: Período (7, 15 ou 30 dias)
+
+        Returns:
+            Lista de dicts com dados das tendências
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            response = self.supabase.table("subniche_trends_snapshot")\
+                .select("*")\
+                .eq("period_days", period_days)\
+                .eq("analyzed_date", today)\
+                .order("subnicho", desc=False)\
+                .execute()
+
+            if response.data:
+                logger.info(f"📊 Subniche trends ({period_days}d): {len(response.data)} registros")
+                return response.data
+
+            logger.warning(f"Nenhum snapshot encontrado para {period_days}d em {today}")
+            return []
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar subniche trends snapshot: {e}")
+            return []
+
+    async def get_all_subniche_trends(self) -> Dict[str, List[Dict]]:
+        """
+        Busca todos os snapshots (7d, 15d, 30d) de uma vez.
+        Útil para frontend carregar tudo em uma request.
+
+        Returns:
+            Dict com chaves '7d', '15d', '30d' contendo listas de trends
+        """
+        try:
+            trends_7d = await self.get_subniche_trends_snapshot(7)
+            trends_15d = await self.get_subniche_trends_snapshot(15)
+            trends_30d = await self.get_subniche_trends_snapshot(30)
+
+            return {
+                "7d": trends_7d,
+                "15d": trends_15d,
+                "30d": trends_30d
+            }
+        except Exception as e:
+            logger.error(f"Erro ao buscar all subniche trends: {e}")
+            return {"7d": [], "15d": [], "30d": []}

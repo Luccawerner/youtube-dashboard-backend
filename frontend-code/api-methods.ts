@@ -23,6 +23,10 @@ async getTopChannels(subniche: string): Promise<TopChannelsResponse> {
   return this.fetchApi<TopChannelsResponse>(`/api/analysis/top-channels?subniche=${encodedSubniche}`);
 }
 
+async getSubnicheTrends(): Promise<SubnicheTrendsResponse> {
+  return this.fetchApi<SubnicheTrendsResponse>('/api/analysis/subniche-trends');
+}
+
 // =========================================================================
 // WEEKLY REPORT - New Methods
 // =========================================================================
@@ -48,7 +52,35 @@ import type {
   TitlePatternsResponse,
   TopChannelsResponse,
   SubnichesResponse,
+  SubnicheTrendsResponse,
   WeeklyReportResponse,
   WeeklyReport
 } from '@/types/analysis';
+*/
+
+// =========================================================================
+// TIPOS SUBNICHE TRENDS (adicionar em src/types/analysis.ts)
+// =========================================================================
+
+/*
+export interface SubnicheTrend {
+  subnicho: string;
+  total_videos: number;
+  avg_views: number;
+  engagement_rate: number;
+  trend_percent: number;
+  period_days: number;
+}
+
+export interface SubnicheTrendsResponse {
+  success: boolean;
+  data: {
+    '7d': SubnicheTrend[];
+    '15d': SubnicheTrend[];
+    '30d': SubnicheTrend[];
+  };
+  total_7d: number;
+  total_15d: number;
+  total_30d: number;
+}
 */

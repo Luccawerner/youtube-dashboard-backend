@@ -769,6 +769,145 @@ class Analyzer:
         print(f"[Analyzer] {len(gaps[:2])} gaps estratégicos identificados para {subniche}")
         return gaps[:2]  # MÁXIMO 2 GAPS MAIS IMPORTANTES
 
+    # =========================================================================
+    # SUBNICHE TRENDS ANALYSIS
+    # =========================================================================
+
+    def analyze_subniche_trends(self, period_days: int) -> List[Dict]:
+        """
+        Analisa tendências por subniche (para pré-cálculo diário).
+
+        Calcula para cada subniche:
+        - Total de vídeos publicados no período
+        - Views médias dos vídeos
+        - Engagement rate: (likes + comments) / views
+        - Tendência: % crescimento comparado ao período anterior
+
+        Args:
+            period_days: Período em dias (7, 15 ou 30)
+
+        Returns:
+            Lista com dados de tendências de todos os subnichos
+        """
+        print(f"[Analyzer] Analisando tendências por subniche ({period_days} dias)...")
+
+        # Buscar todos os subnichos ativos
+        response_subnichos = self.db.table("canais_monitorados")\
+            .select("subnicho")\
+            .eq("status", "ativo")\
+            .eq("tipo", "minerado")\
+            .execute()
+
+        if not response_subnichos.data:
+            print("[Analyzer] Nenhum subniche encontrado")
+            return []
+
+        # Extrair subnichos únicos
+        subnichos = list(set([item['subnicho'] for item in response_subnichos.data if item.get('subnicho')]))
+        print(f"[Analyzer] Processando {len(subnichos)} subnichos...")
+
+        trends = []
+        today = datetime.now()
+        cutoff_date_current = (today - timedelta(days=period_days)).strftime("%Y-%m-%d")
+        cutoff_date_previous = (today - timedelta(days=period_days * 2)).strftime("%Y-%m-%d")
+
+        for subniche in subnichos:
+            try:
+                # ===============================================================
+                # PERÍODO ATUAL (últimos X dias)
+                # ===============================================================
+
+                # Buscar vídeos do período atual
+                response_current = self.db.table("videos_historico")\
+                    .select("video_id, views_atuais, likes, comentarios, canais_monitorados!inner(subnicho, tipo)")\
+                    .eq("canais_monitorados.subnicho", subniche)\
+                    .eq("canais_monitorados.tipo", "minerado")\
+                    .gte("data_publicacao", cutoff_date_current)\
+                    .execute()
+
+                videos_current = response_current.data
+
+                if not videos_current:
+                    # Subniche sem vídeos no período
+                    trends.append({
+                        'subnicho': subniche,
+                        'period_days': period_days,
+                        'total_videos': 0,
+                        'avg_views': 0,
+                        'engagement_rate': 0.0,
+                        'trend_percent': 0.0
+                    })
+                    continue
+
+                # Calcular métricas do período atual
+                total_videos_current = len(videos_current)
+                total_views_current = sum([v.get('views_atuais', 0) for v in videos_current])
+                avg_views_current = total_views_current // total_videos_current if total_videos_current > 0 else 0
+
+                # Calcular engagement rate
+                total_engagement = 0
+                for v in videos_current:
+                    likes = v.get('likes', 0) or 0
+                    comments = v.get('comentarios', 0) or 0
+                    views = v.get('views_atuais', 0) or 0
+                    if views > 0:
+                        total_engagement += (likes + comments) / views
+
+                engagement_rate = (total_engagement / total_videos_current * 100) if total_videos_current > 0 else 0.0
+
+                # ===============================================================
+                # PERÍODO ANTERIOR (para calcular tendência)
+                # ===============================================================
+
+                response_previous = self.db.table("videos_historico")\
+                    .select("video_id, views_atuais, canais_monitorados!inner(subnicho, tipo)")\
+                    .eq("canais_monitorados.subnicho", subniche)\
+                    .eq("canais_monitorados.tipo", "minerado")\
+                    .gte("data_publicacao", cutoff_date_previous)\
+                    .lt("data_publicacao", cutoff_date_current)\
+                    .execute()
+
+                videos_previous = response_previous.data
+
+                # Calcular views médias do período anterior
+                if videos_previous:
+                    total_videos_previous = len(videos_previous)
+                    total_views_previous = sum([v.get('views_atuais', 0) for v in videos_previous])
+                    avg_views_previous = total_views_previous // total_videos_previous if total_videos_previous > 0 else 0
+                else:
+                    avg_views_previous = 0
+
+                # Calcular tendência (% crescimento)
+                if avg_views_previous > 0:
+                    trend_percent = ((avg_views_current - avg_views_previous) / avg_views_previous) * 100
+                else:
+                    trend_percent = 0.0
+
+                # Adicionar resultado
+                trends.append({
+                    'subnicho': subniche,
+                    'period_days': period_days,
+                    'total_videos': total_videos_current,
+                    'avg_views': avg_views_current,
+                    'engagement_rate': round(engagement_rate, 2),
+                    'trend_percent': round(trend_percent, 1)
+                })
+
+            except Exception as e:
+                print(f"[Analyzer] Erro ao processar subniche {subniche}: {e}")
+                # Adicionar com valores zero em caso de erro
+                trends.append({
+                    'subnicho': subniche,
+                    'period_days': period_days,
+                    'total_videos': 0,
+                    'avg_views': 0,
+                    'engagement_rate': 0.0,
+                    'trend_percent': 0.0
+                })
+
+        print(f"[Analyzer] {len(trends)} tendências calculadas para {period_days} dias")
+        return trends
+
 
 # =========================================================================
 # FUNÇÕES AUXILIARES
@@ -860,5 +999,27 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
                 'analyzed_week_start': week_start,
                 'analyzed_week_end': week_end
             }, on_conflict='subniche,gap_title,analyzed_week_start').execute()
+
+    elif analysis_type == 'subniche_trends':
+        # Salvar em subniche_trends_snapshot
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        records = []
+        for item in data:
+            records.append({
+                'subnicho': item['subnicho'],
+                'period_days': item['period_days'],
+                'total_videos': item['total_videos'],
+                'avg_views': item['avg_views'],
+                'engagement_rate': item['engagement_rate'],
+                'trend_percent': item['trend_percent'],
+                'snapshot_date': today,
+                'analyzed_date': today
+            })
+
+        if records:
+            # Upsert: atualiza se existe, cria se não existe (baseado em UNIQUE constraint)
+            db_client.table("subniche_trends_snapshot").upsert(records).execute()
+            print(f"[Analyzer] {len(records)} tendências de subnichos salvas ({period_days} dias)")
 
     print(f"[Analyzer] {len(data)} registros salvos ({analysis_type})")

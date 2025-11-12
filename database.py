@@ -965,20 +965,32 @@ class SupabaseClient:
             Lista de dicts com dados das tendências
         """
         try:
-            today = datetime.now().strftime("%Y-%m-%d")
+            # Buscar a data mais recente disponível para este período
+            latest_date_response = self.supabase.table("subniche_trends_snapshot")\
+                .select("analyzed_date")\
+                .eq("period_days", period_days)\
+                .order("analyzed_date", desc=True)\
+                .limit(1)\
+                .execute()
 
+            if not latest_date_response.data:
+                logger.warning(f"Nenhum snapshot encontrado para {period_days}d")
+                return []
+
+            latest_date = latest_date_response.data[0]["analyzed_date"]
+
+            # Buscar todos os dados dessa data mais recente
             response = self.supabase.table("subniche_trends_snapshot")\
                 .select("*")\
                 .eq("period_days", period_days)\
-                .eq("analyzed_date", today)\
+                .eq("analyzed_date", latest_date)\
                 .order("subnicho", desc=False)\
                 .execute()
 
             if response.data:
-                logger.info(f"📊 Subniche trends ({period_days}d): {len(response.data)} registros")
+                logger.info(f"📊 Subniche trends ({period_days}d): {len(response.data)} registros (data: {latest_date})")
                 return response.data
 
-            logger.warning(f"Nenhum snapshot encontrado para {period_days}d em {today}")
             return []
 
         except Exception as e:

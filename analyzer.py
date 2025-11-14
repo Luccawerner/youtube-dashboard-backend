@@ -1027,7 +1027,15 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
 
         if records:
             # Upsert: atualiza se existe, cria se não existe (baseado em UNIQUE constraint)
-            db_client.table("subniche_trends_snapshot").upsert(records).execute()
-            print(f"[Analyzer] {len(records)} tendências de subnichos salvas ({period_days} dias)")
+            try:
+                response = db_client.table("subniche_trends_snapshot").upsert(
+                    records,
+                    on_conflict='subnicho,period_days,analyzed_date'
+                ).execute()
+                print(f"[Analyzer] ✅ {len(records)} tendências de subnichos salvas ({period_days} dias)")
+                print(f"[Analyzer] 📊 Response: {len(response.data)} registros retornados")
+            except Exception as e:
+                print(f"[Analyzer] ❌ ERRO ao salvar trends: {e}")
+                raise
 
     print(f"[Analyzer] {len(data)} registros salvos ({analysis_type})")

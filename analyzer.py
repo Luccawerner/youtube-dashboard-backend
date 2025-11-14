@@ -1032,10 +1032,10 @@ def save_analysis_to_db(db_client, analysis_type: str, data: List[Dict], period_
                     records,
                     on_conflict='subnicho,period_days,analyzed_date'
                 ).execute()
-                print(f"[Analyzer] ✅ {len(records)} tendências de subnichos salvas ({period_days} dias)")
-                print(f"[Analyzer] 📊 Response: {len(response.data)} registros retornados")
+                print(f"[Analyzer] OK - {len(records)} tendencias de subnichos salvas ({period_days} dias)")
+                print(f"[Analyzer] Response: {len(response.data)} registros retornados")
             except Exception as e:
-                print(f"[Analyzer] ❌ ERRO ao salvar trends: {e}")
+                print(f"[Analyzer] ERRO ao salvar trends: {e}")
                 raise
 
     print(f"[Analyzer] {len(data)} registros salvos ({analysis_type})")

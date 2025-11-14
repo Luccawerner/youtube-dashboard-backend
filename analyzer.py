@@ -847,7 +847,7 @@ class Analyzer:
                     continue
 
                 # Calcular métricas do período atual
-                total_videos_current = len(videos_current)
+                total_videos_current = response_current.count  # Contagem REAL do banco (sem limite de 1000)
                 total_views_current = sum([v.get('views_atuais', 0) for v in videos_current])
                 avg_views_current = total_views_current // total_videos_current if total_videos_current > 0 else 0
 
@@ -878,8 +878,8 @@ class Analyzer:
                 videos_previous = response_previous.data
 
                 # Calcular views médias do período anterior
-                if videos_previous:
-                    total_videos_previous = len(videos_previous)
+                if response_previous.count > 0:
+                    total_videos_previous = response_previous.count  # Contagem REAL do banco (sem limite de 1000)
                     total_views_previous = sum([v.get('views_atuais', 0) for v in videos_previous])
                     avg_views_previous = total_views_previous // total_videos_previous if total_videos_previous > 0 else 0
                 else:

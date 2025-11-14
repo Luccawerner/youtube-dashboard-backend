@@ -89,9 +89,10 @@ class Analyzer:
         cutoff_date = datetime.now() - timedelta(days=period_days)
 
         query = self.db.table("videos_historico")\
-            .select("video_id, titulo, views_atuais, data_publicacao, canais_monitorados!inner(subnicho)")\
+            .select("video_id, titulo, views_atuais, data_publicacao, canais_monitorados!inner(subnicho)", count="exact")\
             .gte("data_publicacao", cutoff_date.strftime("%Y-%m-%d"))\
-            .gte("views_atuais", 50000)
+            .gte("views_atuais", 50000)\
+            .limit(100000)
 
         # Se subniche foi especificado, filtrar
         if subniche:
@@ -338,11 +339,12 @@ class Analyzer:
         cutoff_publication = datetime.now() - timedelta(days=30)
 
         response = self.db.table("videos_historico")\
-            .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)")\
+            .select("video_id, titulo, views_atuais, data_publicacao, data_coleta, canais_monitorados!inner(subnicho)", count="exact")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_publication.strftime("%Y-%m-%d"))\
             .gte("views_atuais", 50000)\
             .order("views_atuais", desc=True)\
+            .limit(100000)\
             .execute()
 
         videos = response.data
@@ -645,22 +647,24 @@ class Analyzer:
 
         # Nossos vídeos (10k+ views, últimos 30 dias)
         response_nossos = self.db.table("videos_historico")\
-            .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
+            .select("duracao, canais_monitorados!inner(tipo, subnicho)", count="exact")\
             .eq("canais_monitorados.tipo", "nosso")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
             .gte("views_atuais", 10000)\
+            .limit(100000)\
             .execute()
 
         nossos_videos = response_nossos.data
 
         # Concorrentes (10k+ views, últimos 30 dias)
         response_concorrentes = self.db.table("videos_historico")\
-            .select("duracao, canais_monitorados!inner(tipo, subnicho)")\
+            .select("duracao, canais_monitorados!inner(tipo, subnicho)", count="exact")\
             .eq("canais_monitorados.tipo", "minerado")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
             .gte("views_atuais", 10000)\
+            .limit(100000)\
             .execute()
 
         concorrentes_videos = response_concorrentes.data
@@ -706,20 +710,22 @@ class Analyzer:
 
         # Contar vídeos por canal (nossos)
         response_nossos_canais = self.db.table("videos_historico")\
-            .select("canal_id, canais_monitorados!inner(tipo, subnicho)")\
+            .select("canal_id, canais_monitorados!inner(tipo, subnicho)", count="exact")\
             .eq("canais_monitorados.tipo", "nosso")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
+            .limit(100000)\
             .execute()
 
         nossos_canais_videos = response_nossos_canais.data
 
         # Contar vídeos por canal (concorrentes)
         response_concorrentes_canais = self.db.table("videos_historico")\
-            .select("canal_id, canais_monitorados!inner(tipo, subnicho)")\
+            .select("canal_id, canais_monitorados!inner(tipo, subnicho)", count="exact")\
             .eq("canais_monitorados.tipo", "minerado")\
             .eq("canais_monitorados.subnicho", subniche)\
             .gte("data_publicacao", cutoff_date)\
+            .limit(100000)\
             .execute()
 
         concorrentes_canais_videos = response_concorrentes_canais.data
@@ -817,12 +823,13 @@ class Analyzer:
                 # PERÍODO ATUAL (últimos X dias)
                 # ===============================================================
 
-                # Buscar vídeos do período atual
+                # Buscar vídeos do período atual (SEM LIMIT - contagem exata)
                 response_current = self.db.table("videos_historico")\
-                    .select("video_id, views_atuais, likes, comentarios, canais_monitorados!inner(subnicho, tipo)")\
+                    .select("video_id, views_atuais, likes, comentarios, canais_monitorados!inner(subnicho, tipo)", count="exact")\
                     .eq("canais_monitorados.subnicho", subniche)\
                     .eq("canais_monitorados.tipo", "minerado")\
                     .gte("data_publicacao", cutoff_date_current)\
+                    .limit(100000)\
                     .execute()
 
                 videos_current = response_current.data
@@ -860,11 +867,12 @@ class Analyzer:
                 # ===============================================================
 
                 response_previous = self.db.table("videos_historico")\
-                    .select("video_id, views_atuais, canais_monitorados!inner(subnicho, tipo)")\
+                    .select("video_id, views_atuais, canais_monitorados!inner(subnicho, tipo)", count="exact")\
                     .eq("canais_monitorados.subnicho", subniche)\
                     .eq("canais_monitorados.tipo", "minerado")\
                     .gte("data_publicacao", cutoff_date_previous)\
                     .lt("data_publicacao", cutoff_date_current)\
+                    .limit(100000)\
                     .execute()
 
                 videos_previous = response_previous.data

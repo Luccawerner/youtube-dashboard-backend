@@ -1318,7 +1318,7 @@ async def run_daily_analysis_job():
     try:
         from analyzer import Analyzer, save_analysis_to_db
         logger.info("=" * 80)
-        logger.info("📊 STARTING DAILY ANALYSIS JOB")
+        logger.info("STARTING DAILY ANALYSIS JOB")
         logger.info("=" * 80)
         analyzer = Analyzer(db.supabase)
         subniches = await db.get_all_subniches()
@@ -1342,15 +1342,15 @@ async def run_daily_analysis_job():
         # =====================================================================
         # SUBNICHE TRENDS (novo - 2025-01-07)
         # =====================================================================
-        logger.info("🔍 Analisando tendências por subniche...")
+        logger.info("Analisando tendencias por subniche...")
         for days in [7, 15, 30]:
             trends = analyzer.analyze_subniche_trends(period_days=days)
             save_analysis_to_db(db.supabase, 'subniche_trends', trends, period_days=days)
-        logger.info(f"✅ Tendências de {len(subniches)} subnichos calculadas (7d, 15d, 30d)")
+        logger.info(f"OK - Tendencias de {len(subniches)} subnichos calculadas (7d, 15d, 30d)")
 
-        logger.info("✅ DAILY ANALYSIS COMPLETED")
+        logger.info("OK - DAILY ANALYSIS COMPLETED")
     except Exception as e:
-        logger.error(f"❌ DAILY ANALYSIS FAILED: {e}")
+        logger.error(f"ERRO - DAILY ANALYSIS FAILED: {e}")
 
 async def run_weekly_report_job():
     """Gera relatório semanal completo (domingos 23h)"""
@@ -1401,7 +1401,7 @@ async def run_daily_analysis_job():
     try:
         from analyzer import Analyzer, save_analysis_to_db
         logger.info("=" * 80)
-        logger.info("📊 STARTING DAILY ANALYSIS JOB")
+        logger.info("STARTING DAILY ANALYSIS JOB")
         logger.info("=" * 80)
         analyzer = Analyzer(db.supabase)
         subniches = await db.get_all_subniches()
@@ -1425,15 +1425,15 @@ async def run_daily_analysis_job():
         # =====================================================================
         # SUBNICHE TRENDS (novo - 2025-01-07)
         # =====================================================================
-        logger.info("🔍 Analisando tendências por subniche...")
+        logger.info("Analisando tendencias por subniche...")
         for days in [7, 15, 30]:
             trends = analyzer.analyze_subniche_trends(period_days=days)
             save_analysis_to_db(db.supabase, 'subniche_trends', trends, period_days=days)
-        logger.info(f"✅ Tendências de {len(subniches)} subnichos calculadas (7d, 15d, 30d)")
+        logger.info(f"OK - Tendencias de {len(subniches)} subnichos calculadas (7d, 15d, 30d)")
 
-        logger.info("✅ DAILY ANALYSIS COMPLETED")
+        logger.info("OK - DAILY ANALYSIS COMPLETED")
     except Exception as e:
-        logger.error(f"❌ DAILY ANALYSIS FAILED: {e}")
+        logger.error(f"ERRO - DAILY ANALYSIS FAILED: {e}")
 
 async def run_weekly_report_job():
     """Gera relatório semanal completo (domingos 23h)"""

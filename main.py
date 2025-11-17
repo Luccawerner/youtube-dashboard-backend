@@ -1353,7 +1353,7 @@ async def run_daily_analysis_job():
         logger.error(f"ERRO - DAILY ANALYSIS FAILED: {e}")
 
 async def run_weekly_report_job():
-    """Gera relatório semanal completo (segundas 23h)"""
+    """Gera relatório semanal completo (segundas 5h AM)"""
     try:
         from report_generator import ReportGenerator
         from analyzer import Analyzer, save_analysis_to_db
@@ -1374,14 +1374,14 @@ async def run_weekly_report_job():
         logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
 
 async def weekly_report_scheduler():
-    """Background task para relatório semanal (segundas 23h)"""
+    """Background task para relatório semanal (segundas 5h AM)"""
     while True:
         try:
             now = datetime.now(timezone.utc)
             sao_paulo_tz = timezone(timedelta(hours=-3))
             now_sp = now.astimezone(sao_paulo_tz)
 
-            if now_sp.weekday() == 0 and now_sp.hour >= 23:
+            if now_sp.weekday() == 0 and now_sp.hour >= 5:
                 await run_weekly_report_job()
                 await asyncio.sleep(86400)
             else:

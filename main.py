@@ -1353,7 +1353,7 @@ async def run_daily_analysis_job():
         logger.error(f"ERRO - DAILY ANALYSIS FAILED: {e}")
 
 async def run_weekly_report_job():
-    """Gera relatório semanal completo (domingos 23h)"""
+    """Gera relatório semanal completo (segundas 23h)"""
     try:
         from report_generator import ReportGenerator
         from analyzer import Analyzer, save_analysis_to_db
@@ -1374,97 +1374,14 @@ async def run_weekly_report_job():
         logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
 
 async def weekly_report_scheduler():
-    """Background task para relatório semanal (domingos 23h)"""
+    """Background task para relatório semanal (segundas 23h)"""
     while True:
         try:
             now = datetime.now(timezone.utc)
             sao_paulo_tz = timezone(timedelta(hours=-3))
             now_sp = now.astimezone(sao_paulo_tz)
 
-            if now_sp.weekday() == 6 and now_sp.hour >= 23:
-                await run_weekly_report_job()
-                await asyncio.sleep(86400)
-            else:
-                await asyncio.sleep(3600)
-        except Exception as e:
-            logger.error(f"❌ Weekly scheduler error: {e}")
-            await asyncio.sleep(3600)
-
-
-
-# =========================================================================
-# CRON JOBS - Daily Analysis + Weekly Report
-# =========================================================================
-
-async def run_daily_analysis_job():
-    """Executa análises diárias após a coleta de dados"""
-    try:
-        from analyzer import Analyzer, save_analysis_to_db
-        logger.info("=" * 80)
-        logger.info("STARTING DAILY ANALYSIS JOB")
-        logger.info("=" * 80)
-        analyzer = Analyzer(db.supabase)
-        subniches = await db.get_all_subniches()
-
-        # Keywords, Patterns e Channels POR SUBNICHE
-        for subniche in subniches:
-            # Keywords por subniche
-            for days in [30, 15, 7]:
-                keywords = analyzer.analyze_keywords(subniche=subniche, period_days=days)
-                save_analysis_to_db(db.supabase, 'keywords', keywords, period_days=days, subniche=subniche)
-
-            # Patterns por subniche
-            for days in [30, 15, 7]:
-                patterns = analyzer.analyze_title_patterns(subniche, period_days=days)
-                save_analysis_to_db(db.supabase, 'patterns', patterns, period_days=days, subniche=subniche)
-
-            # Channels por subniche
-            channels = analyzer.analyze_top_channels(subniche)
-            save_analysis_to_db(db.supabase, 'channels', channels, subniche=subniche)
-
-        # =====================================================================
-        # SUBNICHE TRENDS (novo - 2025-01-07)
-        # =====================================================================
-        logger.info("Analisando tendencias por subniche...")
-        for days in [7, 15, 30]:
-            trends = analyzer.analyze_subniche_trends(period_days=days)
-            save_analysis_to_db(db.supabase, 'subniche_trends', trends, period_days=days)
-        logger.info(f"OK - Tendencias de {len(subniches)} subnichos calculadas (7d, 15d, 30d)")
-
-        logger.info("OK - DAILY ANALYSIS COMPLETED")
-    except Exception as e:
-        logger.error(f"ERRO - DAILY ANALYSIS FAILED: {e}")
-
-async def run_weekly_report_job():
-    """Gera relatório semanal completo (domingos 23h)"""
-    try:
-        from report_generator import ReportGenerator
-        from analyzer import Analyzer, save_analysis_to_db
-        logger.info("📊 STARTING WEEKLY REPORT JOB")
-
-        # Gap analysis
-        analyzer = Analyzer(db.supabase)
-        subniches = await db.get_all_subniches()
-        for subniche in subniches:
-            gaps = analyzer.analyze_gaps(subniche)
-            save_analysis_to_db(db.supabase, 'gaps', gaps, subniche=subniche)
-
-        # Gerar relatório
-        generator = ReportGenerator(db.supabase)
-        report = generator.generate_weekly_report()
-        logger.info(f"✅ WEEKLY REPORT COMPLETED: {report['week_start']} to {report['week_end']}")
-    except Exception as e:
-        logger.error(f"❌ WEEKLY REPORT FAILED: {e}")
-
-async def weekly_report_scheduler():
-    """Background task para relatório semanal (domingos 23h)"""
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            sao_paulo_tz = timezone(timedelta(hours=-3))
-            now_sp = now.astimezone(sao_paulo_tz)
-
-            if now_sp.weekday() == 6 and now_sp.hour >= 23:
+            if now_sp.weekday() == 0 and now_sp.hour >= 23:
                 await run_weekly_report_job()
                 await asyncio.sleep(86400)
             else:

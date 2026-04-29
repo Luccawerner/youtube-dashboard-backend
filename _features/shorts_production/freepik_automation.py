@@ -148,11 +148,10 @@ def _get_page(browser: Browser) -> Page:
     except Exception:
         pass
 
-    # Trazer pro front + forçar viewport 1920x1080
-    try:
-        page.bring_to_front()
-    except Exception:
-        pass
+    # NAO usamos bring_to_front pra nao roubar foco do usuario.
+    # set_viewport_size(1920x1080) via CDP Emulation.setDeviceMetricsOverride
+    # garante que vue-flow renderize tudo independente do tamanho/estado da
+    # janela fisica (minimizada/em background continua funcionando).
     try:
         page.set_viewport_size({"width": 1920, "height": 1080})
     except Exception as e:
@@ -892,7 +891,6 @@ def run_freepik_production(producao_json_path: str, log_callback: Optional[Calla
 
         if img_count < 14 or anim_count < 14:
             log(f"ERRO: prompts incompletos ({img_count} img, {anim_count} anim). Abortando.")
-            browser.close()
             return False
 
         # 6. EXECUTAR WORKFLOW
@@ -915,7 +913,6 @@ def run_freepik_production(producao_json_path: str, log_callback: Optional[Calla
 
         if status["imagens"] > 16:
             log(f"BUG: {status['imagens']} imagens (duplicadas). Precisa correção manual.")
-            browser.close()
             return False
 
         # Polling a cada 30s
@@ -948,7 +945,6 @@ def run_freepik_production(producao_json_path: str, log_callback: Optional[Calla
             time.sleep(30)
         else:
             log("TIMEOUT: produção não finalizou em 25 min")
-            browser.close()
             return False
 
         # 9. BAIXAR
@@ -1008,7 +1004,8 @@ def run_freepik_production(producao_json_path: str, log_callback: Optional[Calla
         log("Baixando narração...")
         baixar_bloco(page, IDS["WRAPPER_NARRACAO"], "NARRACAO", dest_path)
 
-        browser.close()
+        # NAO chamamos browser.close() — em conexoes CDP isso pode fechar tabs
+        # criadas pela sessao Playwright. Cleanup automatico pelo `with sync_playwright`.
 
     # 10. ORGANIZAR
     log("PASSO 10: Organizando downloads...")

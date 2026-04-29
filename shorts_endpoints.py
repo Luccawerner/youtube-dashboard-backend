@@ -791,7 +791,8 @@ def _cleanup_freepik_duplicates() -> dict:
             tabs_info["chosen_dataIds"] = candidates_indexed[0][1]
 
             try:
-                chosen.bring_to_front()
+                # NAO bring_to_front: nao queremos roubar foco do usuario.
+                # set_viewport_size garante render correto via CDP override.
                 chosen.set_viewport_size({"width": 1920, "height": 1080})
                 tabs_info["kept_url"] = chosen.url
                 cdp = chosen.context.new_cdp_session(chosen)
